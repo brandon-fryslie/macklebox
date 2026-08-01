@@ -21,7 +21,15 @@ func FS() fs.FS { return emptyFS{} }
 // complete the fs.FS interface and is never reached while the root is empty.
 type emptyFS struct{}
 
-func (emptyFS) ReadDir(string) ([]fs.DirEntry, error) { return nil, nil }
+// ReadDir reports the root as an empty directory and every other path as
+// nonexistent — reporting "empty" for a path that does not exist would be a
+// silent failure of the fs contract. [LAW:no-silent-failure]
+func (emptyFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	if name != "." {
+		return nil, &fs.PathError{Op: "readdir", Path: name, Err: fs.ErrNotExist}
+	}
+	return nil, nil
+}
 
 func (emptyFS) Open(name string) (fs.File, error) {
 	return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
