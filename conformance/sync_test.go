@@ -224,6 +224,46 @@ func TestBackupEndOfInputAtPromptIsNonzero(t *testing.T) {
 	}
 }
 
+func TestRestoreCopiesMackupCopyBackToHome(t *testing.T) {
+	// Seed a Mackup copy via backup, remove the home file, then restore must
+	// recreate it from the Mackup copy — exercising the restore direction's
+	// mackup→home source/destination mapping.
+	home, _, homeFile := seedApp(t)
+	runEnv(t, home, nil, "--force", "backup", "myapp") // mackup/.myapprc = "config v1"
+	if err := os.Remove(homeFile); err != nil {
+		t.Fatal(err)
+	}
+	r := runEnv(t, home, nil, "--force", "restore", "myapp")
+	if r.Exit != 0 {
+		t.Fatalf("restore exit = %d, want 0; stderr=%q", r.Exit, r.Stderr)
+	}
+	got, err := os.ReadFile(homeFile)
+	if err != nil || string(got) != "config v1\n" {
+		t.Errorf("home file = %q, %v; want the Mackup copy restored", got, err)
+	}
+	if !strings.Contains(stripANSI(r.Stdout), "Recovering .myapprc") {
+		t.Errorf("stdout = %q, want the restore progress line", r.Stdout)
+	}
+}
+
+func TestRestoreReplacesDivergedHomeFileWithMackupCopy(t *testing.T) {
+	// The Mackup copy is the source on restore: a diverged home file is
+	// overwritten by it under --force.
+	home, _, homeFile := seedApp(t)
+	runEnv(t, home, nil, "--force", "backup", "myapp") // mackup = "config v1"
+	if err := os.WriteFile(homeFile, []byte("local edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := runEnv(t, home, nil, "--force", "restore", "myapp")
+	if r.Exit != 0 {
+		t.Fatalf("restore exit = %d, want 0; stderr=%q", r.Exit, r.Stderr)
+	}
+	got, err := os.ReadFile(homeFile)
+	if err != nil || string(got) != "config v1\n" {
+		t.Errorf("home file = %q, %v; want the Mackup copy to win on restore", got, err)
+	}
+}
+
 func TestRestoreMissingMackupFolderIsFatal(t *testing.T) {
 	home := workingHome(t)
 	dropDef(t, home, "myapp", "[application]\nname = MyApp\n[configuration_files]\n.myapprc\n")
