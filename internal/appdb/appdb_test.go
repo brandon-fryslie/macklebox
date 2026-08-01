@@ -219,6 +219,22 @@ func TestCustomXDGBaseRelativization(t *testing.T) {
 	}
 }
 
+func TestFilesReturnsAnOwnedCopy(t *testing.T) {
+	// The assembled database is the authoritative source; mutating a slice
+	// handed out by Files() must not corrupt the stored file set.
+	home := t.TempDir()
+	writeDef(t, legacyDir(home), "vim.cfg", def("Vim", []string{".vimrc"}, nil))
+	db := Assemble(home, "", builtin(nil))
+
+	first, _ := db.Lookup("vim")
+	first.Files()[0] = "hacked"
+
+	second, _ := db.Lookup("vim")
+	if got := second.Files(); len(got) != 1 || got[0] != ".vimrc" {
+		t.Errorf("Files = %v, want the stored set unchanged by a caller's mutation", got)
+	}
+}
+
 func TestUnsupportedApplicationLookupIsTypedAbsence(t *testing.T) {
 	db := Assemble(t.TempDir(), "", builtin(map[string]string{"x.cfg": def("X", nil, nil)}))
 	if _, ok := db.Lookup("nope"); ok {

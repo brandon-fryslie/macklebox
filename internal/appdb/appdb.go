@@ -40,8 +40,15 @@ func (a Application) Name() string { return a.name }
 // Files is the union of the definition's [configuration_files] and
 // home-relativized [xdg_configuration_files] entries, sorted ascending. A
 // consumer cannot tell an XDG-sourced path from a plain one — they are one
-// uniform home-relative type (appspec/05).
-func (a Application) Files() []string { return a.files }
+// uniform home-relative type (appspec/05). It hands out a fresh owned slice —
+// like Keys() and config.Config.Scope() — so the assembled database, the
+// authoritative source, cannot be corrupted through a read accessor.
+// [LAW:one-source-of-truth]
+func (a Application) Files() []string {
+	out := make([]string, len(a.files))
+	copy(out, a.files)
+	return out
+}
 
 // Database maps application key → Application with one deterministic winner per
 // key. It is obtained only from Assemble and read only through its lookups, so
