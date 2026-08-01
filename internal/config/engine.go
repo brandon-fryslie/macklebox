@@ -9,6 +9,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/brandon-fryslie/macklebox/internal/homepath"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -91,10 +93,10 @@ type googleDriveEngine struct{}
 func (googleDriveEngine) root(home string) (string, error) {
 	drive := filepath.Join(home, "Library", "Application Support", "Google", "Drive")
 	db := filepath.Join(drive, "user_default", "sync_config.db")
-	if !isRegularFile(db) {
+	if !homepath.IsRegularFile(db) {
 		db = filepath.Join(drive, "sync_config.db")
 	}
-	if !isRegularFile(db) {
+	if !homepath.IsRegularFile(db) {
 		return "", providerNotFound("Google Drive install")
 	}
 	conn, err := sql.Open("sqlite", db)
@@ -139,9 +141,4 @@ func (e fileSystemEngine) root(home string) (string, error) {
 		return filepath.Clean(e.path), nil
 	}
 	return filepath.Join(home, e.path), nil
-}
-
-func isRegularFile(p string) bool {
-	info, err := os.Stat(p)
-	return err == nil && info.Mode().IsRegular()
 }

@@ -13,6 +13,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/brandon-fryslie/macklebox/internal/homepath"
+	"github.com/brandon-fryslie/macklebox/internal/ini"
 )
 
 // Env is the ambient environment the configuration subsystem reads, captured
@@ -85,11 +88,13 @@ func Load(env Env, explicitPath string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	ini := parseINI(readConfigFile(path))
-	if err := rejectLegacy(ini); err != nil {
+	// appspec/03: the config file's keys are case-normalized (configparser's
+	// default optionxform). [LAW:one-source-of-truth]
+	parsed := ini.Parse(readConfigFile(path), strings.ToLower)
+	if err := rejectLegacy(parsed); err != nil {
 		return Config{}, err
 	}
-	storage := ini["storage"]
+	storage := parsed["storage"]
 	directory := directoryName(storage)
 	root, err := parseEngine(storage).root(home)
 	if err != nil {
@@ -98,8 +103,8 @@ func Load(env Env, explicitPath string) (Config, error) {
 	return Config{
 		root:      root,
 		directory: directory,
-		allow:     keySet(ini["applications_to_sync"]),
-		ignore:    keySet(ini["applications_to_ignore"]),
+		allow:     keySet(parsed["applications_to_sync"]),
+		ignore:    keySet(parsed["applications_to_ignore"]),
 	}, nil
 }
 
@@ -111,16 +116,13 @@ func Load(env Env, explicitPath string) (Config, error) {
 func configPath(env Env, home, explicit string) (string, error) {
 	if explicit != "" {
 		p := resolveUserPath(explicit, home)
-		if !isRegularFile(p) {
+		if !homepath.IsRegularFile(p) {
 			return "", fmt.Errorf("The config file '%s' does not exist. Aborting.", p)
 		}
 		return requireInHome(p, home)
 	}
 
-	xdgBase := env.XDGConfigHome
-	if xdgBase == "" {
-		xdgBase = filepath.Join(home, ".config")
-	}
+	xdgBase := homepath.XDGBase(home, env.XDGConfigHome)
 	candidates := []string{filepath.Join(home, ".mackup.cfg")}
 	if env.MackupConfig != "" {
 		candidates = append(candidates, resolveUserPath(env.MackupConfig, home))
@@ -128,7 +130,7 @@ func configPath(env Env, home, explicit string) (string, error) {
 	candidates = append(candidates, filepath.Join(xdgBase, "mackup", "mackup.cfg"))
 
 	for _, candidate := range candidates {
-		if isRegularFile(candidate) {
+		if homepath.IsRegularFile(candidate) {
 			return requireInHome(candidate, home)
 		}
 	}
@@ -154,11 +156,12 @@ func resolveUserPath(p, home string) string {
 }
 
 // requireInHome is the home-containment check of appspec/03, applied to the
-// finally-resolved path regardless of how it was named. The comparison is
-// lexical on the cleaned paths.
+// finally-resolved path regardless of how it was named. It renders config's
+// guarded failure shape around the shared containment predicate — the single
+// authority on "within home" (appspec/05 relies on the same answer).
+// [LAW:single-enforcer]
 func requireInHome(p, home string) (string, error) {
-	rel, err := filepath.Rel(home, p)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if !homepath.WithinHome(home, p) {
 		return "", fmt.Errorf("The config file '%s' is not in your home directory. Aborting.", p)
 	}
 	return p, nil
@@ -182,9 +185,9 @@ func readConfigFile(path string) string {
 // aborts every command (appspec/03 "Legacy config rejection" — guarded).
 var legacySectionNames = [...]string{"Allowed Applications", "Ignored Applications"}
 
-func rejectLegacy(ini sections) error {
+func rejectLegacy(parsed ini.Sections) error {
 	for _, name := range legacySectionNames {
-		if _, ok := ini[name]; ok {
+		if _, ok := parsed[name]; ok {
 			return errors.New("Old config file detected. Aborting.\n" +
 				"An old section ([Allowed Applications] or [Ignored Applications]) is present in your config file,\n" +
 				"and Mackup would rather do nothing than sync the wrong applications.\n" +

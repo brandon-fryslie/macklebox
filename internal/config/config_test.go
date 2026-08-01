@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,6 +12,22 @@ import (
 // The tests here drive Load through real files under scratch homes — the
 // same observation surface a process-level caller has, minus the process.
 // [LAW:behavior-not-structure]
+
+// mustPanic asserts fn panics with a message containing want — the unguarded
+// failure regime of appspec/01 §6, observed at the package boundary.
+func mustPanic(t *testing.T, want string, fn func()) {
+	t.Helper()
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatalf("no panic; want one mentioning %q", want)
+		}
+		if msg := fmt.Sprint(r); !strings.Contains(msg, want) {
+			t.Fatalf("panic = %q, want it to mention %q", msg, want)
+		}
+	}()
+	fn()
+}
 
 func write(t *testing.T, path, content string) {
 	t.Helper()
