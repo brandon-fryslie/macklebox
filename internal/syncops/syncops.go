@@ -345,18 +345,20 @@ func (e *engine) linkUninstallFile(rel string) {
 	home := filepath.Join(e.home, rel)
 	mackup := filepath.Join(e.mackup, rel)
 
-	// 1. Act only if the Mackup copy exists.
+	// Act only if the Mackup copy exists (appspec/06 step 1).
 	if !existsFileOrDir(mackup) {
 		e.trace("Doing nothing, " + mackup + " does not exist")
 		return
 	}
-	// 3. Nothing at the home path → leave the file storage-only.
+	// Dispatch on the home path (appspec/06 steps 2-3): nothing there means the
+	// file is storage-only and is left alone (step 3); anything else is handled
+	// by step 2 below.
 	if !fileops.PathExists(home) {
 		return
 	}
-	// 2. A home entry that is not our live link is a foreign/user-substituted
-	//    file: warn (to STDOUT — appspec/06 stream note) and skip, so the user's
-	//    own file is never clobbered (appspec/00 promise 10, reversibility).
+	// A home entry that is not our live link is a foreign/user-substituted file
+	// (appspec/06 step 2): warn (to STDOUT — appspec/06 stream note) and skip,
+	// so the user's own file is never clobbered (appspec/00 promise 10).
 	if !fileops.AlreadyLinked(home, mackup) {
 		fmt.Fprintln(e.stdout, color.Anomaly.Paint(fmt.Sprintf(
 			"Warning: the file in your home %q does not point to the original file in Mackup %s, skipping...",
