@@ -121,6 +121,26 @@ func TestBackupPartialFailureReportsAndExitsOne(t *testing.T) {
 	}
 }
 
+func TestReplaceOverwritesWithNewContentOnForce(t *testing.T) {
+	// dst exists and differs; --force replaces it with the current source.
+	home, mackup, homeFile := seedApp(t)
+	runEnv(t, home, nil, "--force", "backup", "myapp") // mackup/.myapprc = v1
+	if err := os.WriteFile(homeFile, []byte("config v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := runEnv(t, home, nil, "--force", "backup", "myapp")
+	if r.Exit != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%q", r.Exit, r.Stderr)
+	}
+	got, err := os.ReadFile(filepath.Join(mackup, ".myapprc"))
+	if err != nil || string(got) != "config v2\n" {
+		t.Errorf("replaced copy = %q, %v; want the new content", got, err)
+	}
+	if m, _ := os.Stat(filepath.Join(mackup, ".myapprc")); m.Mode().Perm() != 0o600 {
+		t.Errorf("replaced mode = %o, want 600", m.Mode().Perm())
+	}
+}
+
 func TestFailedReplaceLeavesTheOldCopyIntact(t *testing.T) {
 	// A replace whose copy fails must not leave the destination missing
 	// (appspec/07: a failing operation makes no filesystem change). Seed a

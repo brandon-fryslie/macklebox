@@ -169,28 +169,43 @@ func (e *engine) perFile(rel string) {
 }
 
 // replace overwrites dst with a copy of src using replace (not merge) semantics,
-// safely. The copy — the failure-prone step — is staged in a unique temp
-// directory beside dst (same filesystem, so the final rename is atomic) while
-// dst stays intact; only once the copy fully succeeds is dst removed and the
-// staged copy moved into place. A copy failure therefore leaves dst untouched,
-// satisfying appspec/07's "no filesystem change for the failing operation" —
-// the same atomic discipline fileops.Copy applies to a single file, lifted to
-// the whole replace.
+// so that dst is never observable as missing — appspec/07's "no filesystem
+// change for the failing operation," made total rather than merely likely.
+//
+// The failure-prone copy is staged in a unique temp directory under dst's parent
+// (same filesystem, so every rename below is atomic) while dst stays intact.
+// Then dst is moved aside and the staged copy moved into place. If the second
+// rename fails, the old copy is rolled back so dst reappears; if even the
+// rollback fails — two same-directory renames failing in succession — the old
+// copy is left on disk with a clear error rather than destroyed. At every point
+// dst is present as the old copy, the new copy, or the restored old copy.
 func replace(src, dst string) error {
 	staging, err := os.MkdirTemp(filepath.Dir(dst), ".mackup-staging-*")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(staging)
 
-	staged := filepath.Join(staging, filepath.Base(dst))
+	staged := filepath.Join(staging, "new")
 	if err := fileops.Copy(src, staged); err != nil {
+		os.RemoveAll(staging)
 		return err // dst untouched
 	}
-	if err := fileops.Delete(dst); err != nil {
+
+	aside := filepath.Join(staging, "old")
+	if err := os.Rename(dst, aside); err != nil {
+		os.RemoveAll(staging)
+		return err // could not move the old copy aside; dst untouched
+	}
+	if err := os.Rename(staged, dst); err != nil {
+		if rbErr := os.Rename(aside, dst); rbErr != nil {
+			// Do not remove staging: aside holds the only copy of the old dst.
+			return fmt.Errorf("replace failed and rollback failed; old copy preserved at %s: %w (rollback: %v)", aside, err, rbErr)
+		}
+		os.RemoveAll(staging)
 		return err
 	}
-	return os.Rename(staged, dst)
+	os.RemoveAll(staging) // success: discard the old copy
+	return nil
 }
 
 func (e *engine) sourcePath(rel string) string {
