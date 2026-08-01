@@ -291,7 +291,7 @@ func (e *engine) linkFile(rel string) {
 
 	// 1. Act only if the Mackup copy exists as real content, home is not already
 	//    our link, and the platform permits syncing this path.
-	if !existsFileOrDir(mackup) || fileops.AlreadyLinked(home, mackup) || !syncAllowedOnPlatform(runtime.GOOS, e.home, home) {
+	if !existsFileOrDir(mackup) || fileops.AlreadyLinked(home, mackup) || !linkAllowedOnPlatform(runtime.GOOS, e.home, home) {
 		e.trace("Doing nothing for " + home)
 		return
 	}
@@ -326,11 +326,17 @@ func (e *engine) linkFile(rel string) {
 	}
 }
 
-// syncAllowedOnPlatform applies appspec/06's platform rule: on Linux a home path
-// under ~/Library/ is not synced (skipped); macOS has no such restriction. The
-// platform is a parameter so the rule is testable without the host's GOOS, and
-// it reuses the shared containment predicate (Library is just another base here).
-func syncAllowedOnPlatform(goos, homeDir, homePath string) bool {
+// linkAllowedOnPlatform applies appspec/06's platform rule, stated in the link
+// section: on Linux a home path under ~/Library/ is not linked (skipped); macOS
+// has no such restriction. The rule is specific to link because link is the one
+// command driven by the Mackup copy — which exists — so on Linux it could
+// otherwise create a symlink under ~/Library, a directory that is meaningless
+// there. Backup, restore, and link install are driven by the home/source file,
+// which does not exist under ~/Library on Linux, so their existence guard skips
+// those paths without a platform rule. The platform is a parameter so the rule
+// is testable without the host's GOOS, and it reuses the shared containment
+// predicate (Library is just another base here).
+func linkAllowedOnPlatform(goos, homeDir, homePath string) bool {
 	if goos != "linux" {
 		return true
 	}
