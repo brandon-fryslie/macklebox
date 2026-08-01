@@ -34,6 +34,22 @@ func TestLinkUninstallRevertsLinkToRealFile(t *testing.T) {
 	}
 }
 
+func TestLinkUninstallVerboseProgressShowsFullPaths(t *testing.T) {
+	home, mackup, _ := seedApp(t)
+	runEnv(t, home, nil, "--force", "link", "install", "myapp") // home → symlink
+
+	r := runEnv(t, home, nil, "--force", "--verbose", "link", "uninstall", "myapp")
+	if r.Exit != 0 {
+		t.Fatalf("exit = %d, want 0; stderr=%q", r.Exit, r.Stderr)
+	}
+	out := stripANSI(r.Stdout)
+	// The verbose form names the Mackup path and the home path, not just <f>.
+	mackupCopy := filepath.Join(mackup, ".myapprc")
+	if !strings.Contains(out, "Reverting "+mackupCopy) || !strings.Contains(out, " at "+filepath.Join(home, ".myapprc")) {
+		t.Errorf("verbose stdout = %q, want the full-path revert form", out)
+	}
+}
+
 func TestLinkUninstallProtectsForeignFileWithWarningOnStdout(t *testing.T) {
 	home, _, homeFile, _ := seedMackupOnly(t)       // Mackup copy present, no home entry
 	writeHome(t, home, ".myapprc", "my own file\n") // a foreign real file at home
