@@ -53,8 +53,8 @@ func TestFullUninstallRevertsKeepsStorageAndPrintsClosing(t *testing.T) {
 	if info, err := os.Lstat(filepath.Join(home, ".myapprc")); err != nil || info.Mode()&os.ModeSymlink != 0 {
 		t.Errorf("home/.myapprc is missing or still a symlink after full uninstall: %v", err)
 	}
-	if got, _ := os.ReadFile(filepath.Join(home, ".myapprc")); string(got) != "stored content\n" {
-		t.Errorf("home/.myapprc = %q, want the stored content copied back", got)
+	if got, err := os.ReadFile(filepath.Join(home, ".myapprc")); err != nil || string(got) != "stored content\n" {
+		t.Errorf("home/.myapprc = %q, %v; want the stored content copied back", got, err)
 	}
 	// The storage folder is deliberately NOT deleted (cross-machine safety).
 	if _, err := os.Stat(filepath.Join(home, "storage", "Mackup")); err != nil {
