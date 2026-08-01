@@ -38,10 +38,9 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 		return 1
 	case ForceConflict:
 		// appspec/02's exit-code table colors every fatal exit-1 diagnostic,
-		// this one included; the verbatim wording contract lives inside the
-		// SGR wrapper.
-		fmt.Fprintln(stderr, fatalError.paint(forceConflictLine))
-		return 1
+		// this one included; its verbatim wording carries no "Error:" prefix, so
+		// it renders through fatalLine rather than fatal.
+		return fatalLine(stderr, forceConflictLine)
 	case Command:
 		return runCommand(inv, stdout, stderr)
 	}
@@ -116,11 +115,22 @@ func isDir(p string) bool {
 	return err == nil && info.IsDir()
 }
 
-// fatal writes one guarded fatal diagnostic — the `Error: …` line that
-// appspec/07 routes to stderr in bright red — and returns the guarded exit
-// code. Every clean fatal exit goes through here so the shape (prefix, color,
-// stream, code) cannot drift between sites. [LAW:single-enforcer]
-func fatal(stderr io.Writer, msg string) int {
-	fmt.Fprintln(stderr, fatalError.paint("Error: "+msg))
+// fatalLine renders one fatal diagnostic — bright red, on stderr, exit 1 — the
+// single rendering path every fatal exit shares (appspec/07). The message text
+// is the caller's: the guarded shape goes through fatal, which adds the "Error:"
+// prefix; the spec's bare contract-token fatals (the "Unsupported application"
+// line, the force-conflict line) pass their exact verbatim wording, which the
+// "Error:" prefix would corrupt. Color, stream, and exit code cannot drift
+// because they live only here. [LAW:single-enforcer]
+func fatalLine(stderr io.Writer, msg string) int {
+	fmt.Fprintln(stderr, fatalError.paint(msg))
 	return 1
+}
+
+// fatal writes one guarded fatal diagnostic — the `Error: …` line that
+// appspec/07 routes to stderr in bright red. It is the "Error:"-prefixed
+// content variant over fatalLine; the guarded shape lives here, the rendering
+// invariant lives in fatalLine. [LAW:single-enforcer]
+func fatal(stderr io.Writer, msg string) int {
+	return fatalLine(stderr, "Error: "+msg)
 }

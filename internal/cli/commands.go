@@ -31,8 +31,9 @@ func runList(db appdb.Database, stdout io.Writer) int {
 func runShow(db appdb.Database, key string, stdout, stderr io.Writer) int {
 	app, ok := db.Lookup(key)
 	if !ok {
-		fmt.Fprintln(stderr, fatalError.paint("Unsupported application: "+key))
-		return 1
+		// The bare "Unsupported application:" contract token (appspec/07) —
+		// through the shared fatal renderer, but without fatal's "Error:" prefix.
+		return fatalLine(stderr, "Unsupported application: "+key)
 	}
 	var b strings.Builder
 	b.WriteString("Name: " + app.Name() + "\n")
