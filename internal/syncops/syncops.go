@@ -52,8 +52,12 @@ var restoreDir = direction{
 	destNoun: "your home folder", forceHint: false, linkSkip: false, sourceIsHome: false,
 }
 
-// engine holds the resolved inputs for one run of the fan-out.
+// engine holds the resolved inputs for one run of the fan-out. opName is the
+// operation's partial-failure summary verb; dir carries the copy operations'
+// direction record and is unused by link install, whose per-file procedure does
+// not read it.
 type engine struct {
+	opName   string
 	dir      direction
 	home     string
 	mackup   string // the Mackup folder: <storage-root>/<directory>
@@ -63,39 +67,53 @@ type engine struct {
 	conf     *Confirmer
 	stdout   io.Writer
 	stderr   io.Writer
-	failures []string // "<src> to <dst>" for each per-file copy failure
+	failures []string // "<src> to <dst>" for each per-file failure
 }
 
-// Backup runs the backup direction; Restore the restore direction. Both take the
-// resolved home and Mackup folder, the application database, the already-resolved
-// and sorted scope (a single named key or the configured set), the run options,
-// the confirmer, and the streams. The exit code is 0 on a complete run, 1 when
-// any file could not be copied (appspec/06 partial-failure) or the folder gate
-// declined.
+// Backup and Restore are the two copy directions; LinkInstall moves home files
+// into the Mackup folder and symlinks them back. All three take the resolved
+// home and Mackup folder, the application database, the already-resolved and
+// sorted scope (a single named key or the configured set), the run options, the
+// confirmer, and the streams. The exit code is 0 on a complete run, 1 when any
+// file failed (appspec/06 partial-failure) or the folder gate declined.
 func Backup(home, mackupFolder string, db appdb.Database, scope []string, opts Options, conf *Confirmer, stdout, stderr io.Writer) int {
-	return run(backupDir, home, mackupFolder, db, scope, opts, conf, stdout, stderr, ensureFolder)
+	e := newEngine("Backup", backupDir, home, mackupFolder, db, scope, opts, conf, stdout, stderr)
+	return e.execute(ensureFolder, e.copyFile)
 }
 
 func Restore(home, mackupFolder string, db appdb.Database, scope []string, opts Options, conf *Confirmer, stdout, stderr io.Writer) int {
-	return run(restoreDir, home, mackupFolder, db, scope, opts, conf, stdout, stderr, requireFolder)
+	e := newEngine("Restore", restoreDir, home, mackupFolder, db, scope, opts, conf, stdout, stderr)
+	return e.execute(requireFolder, e.copyFile)
 }
 
-// gate is the Mackup-folder environment gate for the direction (appspec/06):
-// backup ensures the folder (create-on-confirm), restore requires it. It returns
-// ok=false with a rendered exit code when the gate fails.
+func LinkInstall(home, mackupFolder string, db appdb.Database, scope []string, opts Options, conf *Confirmer, stdout, stderr io.Writer) int {
+	e := newEngine("Link install", direction{}, home, mackupFolder, db, scope, opts, conf, stdout, stderr)
+	return e.execute(ensureFolder, e.linkInstallFile)
+}
+
+func newEngine(opName string, dir direction, home, mackupFolder string, db appdb.Database, scope []string, opts Options, conf *Confirmer, stdout, stderr io.Writer) *engine {
+	return &engine{
+		opName: opName, dir: dir, home: home, mackup: mackupFolder, db: db,
+		scope: scope, opts: opts, conf: conf, stdout: stdout, stderr: stderr,
+	}
+}
+
+// gate is the Mackup-folder environment gate (appspec/06): ensure the folder
+// (create-on-confirm) or require it. It returns ok=false with a rendered exit
+// code when the gate fails.
 type gate func(e *engine) (ok bool, code int)
 
-func run(dir direction, home, mackupFolder string, db appdb.Database, scope []string, opts Options, conf *Confirmer, stdout, stderr io.Writer, g gate) int {
-	e := &engine{
-		dir: dir, home: home, mackup: mackupFolder, db: db, scope: scope,
-		opts: opts, conf: conf, stdout: stdout, stderr: stderr,
-	}
+// execute is the shared shape of every sync command: pass the folder gate, run
+// perFile over the two-level sorted fan-out, then emit the partial-failure
+// summary and exit code. The per-file procedure is the one part that varies.
+// [LAW:one-type-per-behavior]
+func (e *engine) execute(g gate, perFile func(rel string)) int {
 	if ok, code := g(e); !ok {
 		return code
 	}
-	// Two-level sorted fan-out (appspec/01 §1): applications in sorted key
-	// order, files within each in sorted order. scope is pre-sorted; Files() is
-	// sorted. Each file is handled independently.
+	// appspec/01 §1: applications in sorted key order, files within each in
+	// sorted order (scope is pre-sorted; Files() is sorted); each handled
+	// independently.
 	for _, key := range e.scope {
 		app, ok := e.db.Lookup(key)
 		if !ok {
@@ -105,15 +123,15 @@ func run(dir direction, home, mackupFolder string, db appdb.Database, scope []st
 			panic("syncops: scope key not in the application database: " + key)
 		}
 		for _, rel := range app.Files() {
-			e.perFile(rel)
+			perFile(rel)
 		}
 	}
 	return e.finish()
 }
 
-// perFile is the shared per-file procedure of appspec/06 §"The shared per-file
+// copyFile is the shared per-file procedure of appspec/06 §"The shared per-file
 // procedure", identical for backup and restore save for the direction record.
-func (e *engine) perFile(rel string) {
+func (e *engine) copyFile(rel string) {
 	src := e.sourcePath(rel)
 	dst := e.destPath(rel)
 
@@ -168,6 +186,88 @@ func (e *engine) perFile(rel string) {
 	}
 	if err := fileops.Copy(src, dst); err != nil {
 		e.recordFailure(src, dst, err)
+	}
+}
+
+// linkInstallFile is the per-file procedure of appspec/06 "link install": move
+// a real home file into the Mackup folder and replace it with a symlink. It acts
+// only on a home path that exists as a real file/dir and is not already linked
+// into Mackup (the shared predicate), so an already-linked file is skipped and
+// the command is idempotent.
+func (e *engine) linkInstallFile(rel string) {
+	home := filepath.Join(e.home, rel)
+	mackup := filepath.Join(e.mackup, rel)
+
+	// 1. Act only on real, not-already-linked home content.
+	if !existsFileOrDir(home) || fileops.AlreadyLinked(home, mackup) {
+		e.linkInstallTrace(home, mackup)
+		return
+	}
+	// 2. Progress.
+	if e.opts.Verbose {
+		fmt.Fprintln(e.stdout, color.Info.Paint("Backing up\n  "+home+"\n  to\n  "+mackup+" ..."))
+	} else {
+		fmt.Fprintln(e.stdout, color.Info.Paint("Linking "+rel+" ..."))
+	}
+	if e.opts.DryRun {
+		return // dry-run stops after the progress line
+	}
+
+	// 3. If a backup copy already exists, confirm replacing it with the home
+	//    content; otherwise copy the home content in fresh. Unlike backup and
+	//    restore, the link family does not aggregate failures — a failure inside
+	//    a link operation is an uncaught error that stops the run (appspec/06
+	//    partial-failure contract, the deliberate honesty-of-failure asymmetry).
+	if fileops.PathExists(mackup) {
+		yes, err := e.conf.ask(fmt.Sprintf(
+			"A %s named %s already exists in the backup. Are you sure that you want to replace it?",
+			pathKind(mackup), mackup))
+		if err != nil {
+			panic(err)
+		}
+		if !yes {
+			return
+		}
+		if err := e.replace(home, mackup); err != nil {
+			panic("link install: cannot replace the backup copy " + mackup + ": " + err.Error())
+		}
+	} else if err := fileops.Copy(home, mackup); err != nil {
+		panic("link install: cannot copy " + home + " into the Mackup folder: " + err.Error())
+	}
+
+	// The content now lives in Mackup. Turn the home path into a symlink to it:
+	// delete the home file, then link. This copy → delete-home → symlink order is
+	// appspec/06's one documented non-atomic window (appspec/01 §2, appspec/07
+	// crash residue): an interruption between the delete and the link leaves the
+	// home path missing while the content survives in Mackup (StateMackupOnly).
+	// Re-running `link` recovers it (re-links from the surviving Mackup copy);
+	// link install itself acts only on real home content (step 1 above), so it
+	// does not re-link a mackup-only file.
+	if err := fileops.Delete(home); err != nil {
+		panic("link install: cannot remove the home file " + home + ": " + err.Error())
+	}
+	if err := fileops.Link(mackup, home); err != nil {
+		panic("link install: cannot create the symlink " + home + ": " + err.Error())
+	}
+}
+
+// linkInstallTrace prints the verbose "Doing nothing" trace keyed on the file's
+// LinkState (appspec/06 link-install step 1). It is silent unless verbose.
+func (e *engine) linkInstallTrace(home, mackup string) {
+	if !e.opts.Verbose {
+		return
+	}
+	switch fileops.State(home, mackup) {
+	case fileops.StateAlreadyLinked:
+		e.trace("Doing nothing, " + home + " is already linked to " + mackup)
+	case fileops.StateBrokenLink:
+		e.trace("Doing nothing, " + home + " is a broken link")
+	case fileops.StateMackupOnly:
+		// The crash-window residue: home is gone but the content survives in
+		// Mackup. Say so, so verbose output does not imply the data is lost.
+		e.trace("Doing nothing, " + home + " does not exist (its content is in the Mackup folder; run 'link' to recover)")
+	default:
+		e.trace("Doing nothing, " + home + " does not exist")
 	}
 }
 
@@ -272,7 +372,7 @@ func (e *engine) finish() int {
 		return 0
 	}
 	fmt.Fprintln(e.stderr, color.CopyFailure.Paint(
-		fmt.Sprintf("%s incomplete: %d file(s) could not be copied:", e.dir.name, len(e.failures))))
+		fmt.Sprintf("%s incomplete: %d file(s) could not be copied:", e.opName, len(e.failures))))
 	for _, f := range e.failures {
 		fmt.Fprintln(e.stderr, color.CopyFailure.Paint("  "+f))
 	}

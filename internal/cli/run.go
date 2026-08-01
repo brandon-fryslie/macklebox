@@ -89,7 +89,7 @@ func runCommand(cmd Command, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runList(db, stdout)
 	case VerbShow:
 		return runShow(db, cmd.App, stdout, stderr)
-	case VerbBackup, VerbRestore:
+	case VerbBackup, VerbRestore, VerbLinkInstall:
 		scope, ok := resolveScope(cmd.App, cfg, db, stderr)
 		if !ok {
 			return 1 // an unknown named application (message already written)
@@ -97,10 +97,15 @@ func runCommand(cmd Command, stdin io.Reader, stdout, stderr io.Writer) int {
 		conf := syncops.NewConfirmer(cmd.Confirm, stdin, stdout)
 		opts := syncops.Options{DryRun: cmd.DryRun, Verbose: cmd.Verbose}
 		home := filepath.Clean(env.Home)
-		if cmd.Verb == VerbBackup {
-			return syncops.Backup(home, cfg.MackupFolder(), db, scope, opts, conf, stdout, stderr)
+		folder := cfg.MackupFolder()
+		switch cmd.Verb {
+		case VerbBackup:
+			return syncops.Backup(home, folder, db, scope, opts, conf, stdout, stderr)
+		case VerbRestore:
+			return syncops.Restore(home, folder, db, scope, opts, conf, stdout, stderr)
+		default:
+			return syncops.LinkInstall(home, folder, db, scope, opts, conf, stdout, stderr)
 		}
-		return syncops.Restore(home, cfg.MackupFolder(), db, scope, opts, conf, stdout, stderr)
 	default:
 		return fatal(stderr, "the "+cmd.Verb.String()+" command is not implemented yet")
 	}
