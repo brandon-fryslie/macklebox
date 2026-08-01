@@ -35,13 +35,15 @@ func TestVersionIsColoredOnStdoutWhenPiped(t *testing.T) {
 func TestFatalErrorIsColoredOnStderrWhenPiped(t *testing.T) {
 	// Any real command fails at the config gate under a scratch HOME; the
 	// fatal `Error:` diagnostic must be bright red (91) on stderr with stdout
-	// untouched, per appspec/07's stream table and color scheme.
+	// untouched, per appspec/07's stream table and color scheme. The gate
+	// failure is the Dropbox provider fatal, which the spec's error table
+	// makes multi-line — hence (?s), one 91-wrap around the whole diagnostic.
 	r := run(t, "backup")
 	if r.Exit != 1 {
 		t.Errorf("exit = %d, want 1", r.Exit)
 	}
-	if !regexp.MustCompile(`^\x1b\[91mError: .+\x1b\[0m\n$`).MatchString(r.Stderr) {
-		t.Errorf("stderr = %q, want a bright-red SGR-wrapped 'Error: …' line", r.Stderr)
+	if !regexp.MustCompile(`(?s)^\x1b\[91mError: .+\x1b\[0m\n$`).MatchString(r.Stderr) {
+		t.Errorf("stderr = %q, want a bright-red SGR-wrapped 'Error: …' diagnostic", r.Stderr)
 	}
 	if r.Stdout != "" {
 		t.Errorf("stdout = %q, want empty", r.Stdout)
