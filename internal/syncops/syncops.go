@@ -139,7 +139,10 @@ func (e *engine) perFile(rel string) {
 		}
 		if cmp.Detail != "" {
 			fmt.Fprintln(e.stdout, color.Anomaly.Paint(rel+" differs between "+e.dir.driftPhr+":"))
-			fmt.Fprint(e.stdout, color.Info.Paint(cmp.Detail))
+			// Fprintln (not Fprint): some drift details are a single line with no
+			// trailing newline, and the prompt writes to the same stream — without
+			// this the prompt would collide onto the detail's line.
+			fmt.Fprintln(e.stdout, color.Info.Paint(cmp.Detail))
 		}
 		prompt := fmt.Sprintf("A %s named %s already exists in %s. Are you sure that you want to replace it?",
 			pathKind(dst), dst, e.dir.destNoun)
@@ -153,7 +156,7 @@ func (e *engine) perFile(rel string) {
 		if !yes {
 			return
 		}
-		if err := replace(src, dst); err != nil {
+		if err := e.replace(src, dst); err != nil {
 			e.recordFailure(src, dst, err)
 		}
 		return
@@ -179,7 +182,7 @@ func (e *engine) perFile(rel string) {
 // rollback fails — two same-directory renames failing in succession — the old
 // copy is left on disk with a clear error rather than destroyed. At every point
 // dst is present as the old copy, the new copy, or the restored old copy.
-func replace(src, dst string) error {
+func (e *engine) replace(src, dst string) error {
 	staging, err := os.MkdirTemp(filepath.Dir(dst), ".mackup-staging-*")
 	if err != nil {
 		return err
@@ -187,13 +190,13 @@ func replace(src, dst string) error {
 
 	staged := filepath.Join(staging, "new")
 	if err := fileops.Copy(src, staged); err != nil {
-		os.RemoveAll(staging)
+		e.cleanupStaging(staging)
 		return err // dst untouched
 	}
 
 	aside := filepath.Join(staging, "old")
 	if err := os.Rename(dst, aside); err != nil {
-		os.RemoveAll(staging)
+		e.cleanupStaging(staging)
 		return err // could not move the old copy aside; dst untouched
 	}
 	if err := os.Rename(staged, dst); err != nil {
@@ -201,11 +204,23 @@ func replace(src, dst string) error {
 			// Do not remove staging: aside holds the only copy of the old dst.
 			return fmt.Errorf("replace failed and rollback failed; old copy preserved at %s: %w (rollback: %v)", aside, err, rbErr)
 		}
-		os.RemoveAll(staging)
+		e.cleanupStaging(staging)
 		return err
 	}
-	os.RemoveAll(staging) // success: discard the old copy
+	e.cleanupStaging(staging) // success: discard the old copy
 	return nil
+}
+
+// cleanupStaging removes the temporary staging directory. A failure here does
+// not affect the operation's outcome (the replace already succeeded or was
+// rolled back), but it leaves an orphaned .mackup-staging-* directory in the
+// user's folder, so it is surfaced as a non-fatal warning rather than
+// discarded. [LAW:no-silent-failure]
+func (e *engine) cleanupStaging(staging string) {
+	if err := os.RemoveAll(staging); err != nil {
+		fmt.Fprintln(e.stderr, color.Anomaly.Paint(
+			"Warning: could not remove staging directory "+staging+": "+err.Error()))
+	}
 }
 
 func (e *engine) sourcePath(rel string) string {
