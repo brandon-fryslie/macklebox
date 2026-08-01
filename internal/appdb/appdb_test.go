@@ -238,6 +238,34 @@ func TestAbsoluteXDGPathIsFatal(t *testing.T) {
 	mustPanic(t, "Unsupported absolute path: /etc/shadow", func() { Assemble(home, "", builtin(nil)) })
 }
 
+func TestDotDotEscapeInConfigPathIsFatal(t *testing.T) {
+	// The home-relativity guarantee covers [configuration_files] too: a `..`
+	// sequence that leaves home, though it carries no leading slash, must be
+	// fatal — otherwise the sync engine writes outside home.
+	home := t.TempDir()
+	writeDef(t, legacyDir(home), "bad.cfg", def("Bad", []string{"../../rachel/data"}, nil))
+	mustPanic(t, "escapes the home directory", func() { Assemble(home, "", builtin(nil)) })
+}
+
+func TestDotDotEscapeInXDGPathIsFatal(t *testing.T) {
+	// Same escape through an [xdg_configuration_files] entry, after XDG
+	// relativization.
+	home := t.TempDir()
+	writeDef(t, legacyDir(home), "bad.cfg", def("Bad", nil, []string{"../../../rachel/data"}))
+	mustPanic(t, "escapes the home directory", func() { Assemble(home, "", builtin(nil)) })
+}
+
+func TestInternalDotDotThatStaysUnderHomeIsAllowed(t *testing.T) {
+	// A `..` that resolves back to a path still under home is legitimate and
+	// must not be rejected — only escapes are fatal.
+	home := t.TempDir()
+	writeDef(t, legacyDir(home), "app.cfg", def("App", []string{".config/../local/foo"}, nil))
+	app, ok := Assemble(home, "", builtin(nil)).Lookup("app")
+	if !ok || len(app.Files()) != 1 || app.Files()[0] != ".config/../local/foo" {
+		t.Errorf("Files = %v, want the in-home path stored verbatim", app.Files())
+	}
+}
+
 func TestOutOfHomeXDGBaseIsFatal(t *testing.T) {
 	home := t.TempDir()
 	outside := t.TempDir() // a sibling temp dir, not under home

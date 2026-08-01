@@ -1,6 +1,7 @@
 package homepath
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -24,6 +25,23 @@ func TestWithinHome(t *testing.T) {
 		if got := WithinHome(home, filepath.Clean(c.p)); got != c.want {
 			t.Errorf("WithinHome(%q, %q) = %v, want %v", home, c.p, got, c.want)
 		}
+	}
+}
+
+func TestIsRegularFile(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "regular")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !IsRegularFile(file) {
+		t.Error("IsRegularFile(regular file) = false, want true")
+	}
+	if IsRegularFile(dir) {
+		t.Error("IsRegularFile(directory) = true, want false")
+	}
+	if IsRegularFile(filepath.Join(dir, "does-not-exist")) {
+		t.Error("IsRegularFile(nonexistent) = true, want false")
 	}
 }
 

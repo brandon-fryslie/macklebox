@@ -104,3 +104,9 @@ func TestParseUnknownSectionsAreKept(t *testing.T) {
 func TestParseKeyOutsideSectionIsLoud(t *testing.T) {
 	mustPanic(t, "outside any [section]", func() { Parse("orphan = 1\n[storage]\n", lower) })
 }
+
+func TestParseEmptyKeyIsLoud(t *testing.T) {
+	// A line whose key normalizes to empty (only whitespace before '=') is the
+	// second loud-failure branch — a malformed line, not a droppable one.
+	mustPanic(t, "no key", func() { Parse("[storage]\n  = value\n", lower) })
+}

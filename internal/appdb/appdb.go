@@ -148,10 +148,14 @@ func parseDefinition(key, text, home, xdgBase string) Application {
 
 	fileSet := map[string]bool{}
 	for path := range secs["configuration_files"] {
-		fileSet[requireHomeRelative(path)] = true
+		// [configuration_files] entries are authored home-relative and stored
+		// verbatim; authored path and stored path are the same value.
+		fileSet[requireUnderHome(home, path, path)] = true
 	}
 	for path := range secs["xdg_configuration_files"] {
-		fileSet[xdgToHomeRelative(path, home, xdgBase)] = true
+		// [xdg_configuration_files] entries are authored relative to the XDG
+		// base; render home-relative first, then run the same guarantee check.
+		fileSet[requireUnderHome(home, path, xdgToHomeRelative(path, home, xdgBase))] = true
 	}
 
 	files := make([]string, 0, len(fileSet))
@@ -162,25 +166,33 @@ func parseDefinition(key, text, home, xdgBase string) Application {
 	return Application{name: name, files: files}
 }
 
-// requireHomeRelative rejects an absolute path — one that starts with '/', per
-// appspec/05's literal leading-slash test — and returns a home-relative one
-// verbatim, exact case preserved.
-func requireHomeRelative(path string) string {
-	if strings.HasPrefix(path, "/") {
-		panic("Unsupported absolute path: " + path)
+// requireUnderHome enforces the appspec/05 home-relativity guarantee for one
+// file-set entry, and is the single choke point every path from either section
+// passes through. [LAW:single-enforcer] It rejects an absolute (leading-'/')
+// authored path with the pinned appspec/07 message, then rejects any stored
+// path that escapes home once joined to HOME. The second check is not
+// redundant with the first: a '..' sequence carries no leading slash yet still
+// leaves home (e.g. "../../rachel/data" joined to /home/bob resolves to
+// /home/rachel/data), and the sync engine, which never re-checks, would then
+// write outside home. filepath.Join resolves the '..' before the containment
+// test. Returns the stored home-relative path, case preserved.
+func requireUnderHome(home, authored, stored string) string {
+	if strings.HasPrefix(authored, "/") {
+		// appspec/05 + appspec/07: uncaught, names the offending path.
+		panic("Unsupported absolute path: " + authored)
 	}
-	return path
+	if !homepath.WithinHome(home, filepath.Join(home, stored)) {
+		panic("Unsupported path escapes the home directory: " + authored)
+	}
+	return stored
 }
 
-// xdgToHomeRelative renders an [xdg_configuration_files] entry as home-relative
-// (appspec/05): reject a leading-slash absolute path, join it under the XDG
-// base, then strip the home prefix so it is stored exactly like a
-// [configuration_files] entry. The XDG base's own containment was established
-// once in Assemble, so the joined path is guaranteed under home here.
+// xdgToHomeRelative renders an [xdg_configuration_files] entry (authored
+// relative to the XDG base) as a home-relative path: join it under the XDG base
+// and strip the home prefix, so it is stored exactly like a
+// [configuration_files] entry (appspec/05). Absolute-path and escape rejection
+// belong to requireUnderHome, applied uniformly to both sections.
 func xdgToHomeRelative(path, home, xdgBase string) string {
-	if strings.HasPrefix(path, "/") {
-		panic("Unsupported absolute path: " + path)
-	}
 	rel, err := filepath.Rel(home, filepath.Join(xdgBase, path))
 	if err != nil {
 		panic("cannot render XDG config path relative to home: " + path)
