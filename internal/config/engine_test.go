@@ -89,11 +89,17 @@ func TestDirectoryCustomValueIsVerbatim(t *testing.T) {
 func TestDirectoryForbiddenValuesAreUnguarded(t *testing.T) {
 	// appspec/03: the storage sub-directory may never collide with a
 	// custom-apps directory.
+	// The slash-decorated forms normalize onto the same on-disk collision, so
+	// they are the same forbidden value, not near-misses.
 	for _, dir := range []string{
 		".mackup",
+		".mackup/",
 		"mackup/applications",
+		"mackup/applications/",
 		".config/mackup/applications",
+		"./.config/mackup/applications",
 		"nested/.config/mackup/applications",
+		"nested/.config/mackup/applications/",
 	} {
 		env := storageEnv(t, "engine = file_system\npath = store\ndirectory = "+dir+"\n")
 		mustPanic(t, dir, func() { _, _ = Load(env, "") })

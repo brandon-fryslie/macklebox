@@ -196,16 +196,20 @@ func rejectLegacy(ini sections) error {
 
 // directoryName reads [storage] directory, defaulting to "Mackup". The value
 // is constrained, not free (appspec/03): the two custom-apps collisions are
-// unguarded fatals; anything else is accepted verbatim.
+// unguarded fatals; anything else is accepted verbatim. The comparison runs
+// on the cleaned path — filepath.Join normalizes the value onto the disk
+// anyway, so "mackup/applications/" and "./.mackup" are the same collision
+// the constraint forbids, not different values.
 func directoryName(storage map[string]string) string {
 	dir, ok := storage["directory"]
 	if !ok {
 		return "Mackup"
 	}
-	if dir == ".mackup" ||
-		dir == "mackup/applications" ||
-		dir == ".config/mackup/applications" ||
-		strings.HasSuffix(dir, "/.config/mackup/applications") {
+	cleaned := filepath.Clean(dir)
+	if cleaned == ".mackup" ||
+		cleaned == "mackup/applications" ||
+		cleaned == ".config/mackup/applications" ||
+		strings.HasSuffix(cleaned, "/.config/mackup/applications") {
 		panic("Forbidden storage directory value: " + dir)
 	}
 	return dir

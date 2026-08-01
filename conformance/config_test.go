@@ -149,12 +149,20 @@ func TestDiscoveryEnvironmentWiring(t *testing.T) {
 	writeHome(t, home, "xdg/mackup/mackup.cfg", "[storage]\nengine = dropbox\n")
 	xdg := "XDG_CONFIG_HOME=" + filepath.Join(home, "xdg")
 
+	// Both winners are guarded provider fatals, so each observation also pins
+	// the shared post-condition: exit 1, nothing on stdout.
 	r := runEnv(t, home, []string{"MACKUP_CONFIG=~/mc.cfg", xdg}, "list")
 	if !strings.Contains(stripANSI(r.Stderr), "iCloud Drive") {
 		t.Errorf("with MACKUP_CONFIG set: stderr = %q, want the iCloud fatal (MACKUP_CONFIG wins)", r.Stderr)
 	}
+	if r.Exit != 1 || r.Stdout != "" {
+		t.Errorf("with MACKUP_CONFIG set: exit = %d, stdout = %q; want 1 and empty", r.Exit, r.Stdout)
+	}
 	r = runEnv(t, home, []string{xdg}, "list")
 	if !strings.Contains(stripANSI(r.Stderr), "Dropbox install") {
 		t.Errorf("without MACKUP_CONFIG: stderr = %q, want the Dropbox fatal (XDG candidate wins)", r.Stderr)
+	}
+	if r.Exit != 1 || r.Stdout != "" {
+		t.Errorf("without MACKUP_CONFIG: exit = %d, stdout = %q; want 1 and empty", r.Exit, r.Stdout)
 	}
 }
