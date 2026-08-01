@@ -39,9 +39,10 @@ func TestVersionGoesToStdoutExitZero(t *testing.T) {
 		t.Errorf("exit = %d, want 0", code)
 	}
 	// appspec/02: the line is `Mackup <version>`; the version value is the
-	// installed package version or the stable fallback token.
-	if !regexp.MustCompile(`^Mackup \S+\n$`).MatchString(stdout) {
-		t.Errorf("stdout = %q, want a single 'Mackup <version>' line", stdout)
+	// installed package version or the stable fallback token. appspec/07
+	// colors it at info level (yellow), unconditionally.
+	if !regexp.MustCompile(`^\x1b\[33mMackup \S+\x1b\[0m\n$`).MatchString(stdout) {
+		t.Errorf("stdout = %q, want a single yellow 'Mackup <version>' line", stdout)
 	}
 	if stderr != "" {
 		t.Errorf("stderr = %q, want empty", stderr)
@@ -53,7 +54,9 @@ func TestForceConflictExactStderrLineExitOne(t *testing.T) {
 	if code != 1 {
 		t.Errorf("exit = %d, want 1", code)
 	}
-	if want := "Options --force and --force-no are mutually exclusive.\n"; stderr != want {
+	// The wording is verbatim contract; appspec/02 wraps every fatal exit-1
+	// diagnostic in fatal-error color.
+	if want := "\x1b[91mOptions --force and --force-no are mutually exclusive.\x1b[0m\n"; stderr != want {
 		t.Errorf("stderr = %q, want %q", stderr, want)
 	}
 	if stdout != "" {

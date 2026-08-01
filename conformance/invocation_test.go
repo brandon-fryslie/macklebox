@@ -34,8 +34,10 @@ func TestVersionPrintsMackupLineAndExitsZero(t *testing.T) {
 	}
 	// appspec/02: the line is `Mackup <version>`; the value is the package
 	// version when installed, a stable fallback token otherwise (appspec/00
-	// "Provenance"), so the rig pins the shape, not the token.
-	if !regexp.MustCompile(`^Mackup \S+\n$`).MatchString(r.Stdout) {
+	// "Provenance"), so the rig pins the shape, not the token. Coloring is
+	// appspec/07's separate fact (output_test.go), so the shape is checked on
+	// the stripped text. [LAW:single-enforcer]
+	if !regexp.MustCompile(`^Mackup \S+\n$`).MatchString(stripANSI(r.Stdout)) {
 		t.Errorf("stdout = %q, want a single 'Mackup <version>' line", r.Stdout)
 	}
 	if r.Stderr != "" {
@@ -62,9 +64,11 @@ func TestForceFlagConflictIsTheExactStderrLine(t *testing.T) {
 		t.Errorf("exit = %d, want 1", r.Exit)
 	}
 	// The one line appspec/02 "Mutually exclusive force flags" specifies
-	// verbatim — here the wording IS the contract.
-	if want := "Options --force and --force-no are mutually exclusive.\n"; r.Stderr != want {
-		t.Errorf("stderr = %q, want %q", r.Stderr, want)
+	// verbatim — here the wording IS the contract. appspec/02 colors every
+	// fatal exit-1 diagnostic, so the verbatim check reads through the SGR
+	// wrapper; the color itself is output_test.go's fact.
+	if want := "Options --force and --force-no are mutually exclusive.\n"; stripANSI(r.Stderr) != want {
+		t.Errorf("stderr = %q, want %q (ignoring color)", r.Stderr, want)
 	}
 	if r.Stdout != "" {
 		t.Errorf("stdout = %q, want empty", r.Stdout)
