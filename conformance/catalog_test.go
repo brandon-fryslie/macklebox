@@ -19,13 +19,20 @@ func appendixKeys(t *testing.T) []string {
 		t.Fatal(err)
 	}
 	defer f.Close()
+	// Read only the first fenced block — the key list. A later fenced block
+	// (a prose example, a migration note) must not leak into the oracle, and an
+	// appendix with no fenced block is a structural change the test must report,
+	// not silently treat as zero keys. [LAW:no-silent-failure]
 	var keys []string
-	inFence := false
+	inFence, sawFence := false, false
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := sc.Text()
 		if strings.HasPrefix(line, "```") {
-			inFence = !inFence
+			if inFence {
+				break // first fenced block closed; the key list ends here
+			}
+			inFence, sawFence = true, true
 			continue
 		}
 		if inFence {
@@ -36,6 +43,9 @@ func appendixKeys(t *testing.T) []string {
 	}
 	if err := sc.Err(); err != nil {
 		t.Fatal(err)
+	}
+	if !sawFence {
+		t.Fatal("no fenced key block found in the appendix")
 	}
 	return keys
 }
