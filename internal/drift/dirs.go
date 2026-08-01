@@ -12,9 +12,10 @@ import (
 // compareDirs compares two directories recursively by content (appspec/06). They
 // are identical only if every regular file matches byte-for-byte and neither
 // side has an entry the other lacks. Otherwise the detail lists the differences,
-// sorted: "changed: <rel>", "only in source: <rel>", "only in target: <rel>".
-// Byte-for-byte is the directory contract, not the plist/text/binary cascade
-// single-file comparison uses.
+// sorted: "cannot read: <rel>" (present on both but unreadable), "changed:
+// <rel>", "only in source: <rel>", "only in target: <rel>". Byte-for-byte is the
+// directory contract, not the plist/text/binary cascade single-file comparison
+// uses.
 //
 // "Entry" means any tree member — a regular file, a subdirectory, or a symlink —
 // so a directory-structure difference (an empty subdir on one side, an entry
@@ -39,7 +40,11 @@ func compareDirs(source, dest string) Comparison {
 		case srcRegular != dstRegular:
 			lines = append(lines, "changed: "+rel) // same path, different kind
 		case srcRegular && dstRegular:
-			if !filesEqual(filepath.Join(source, rel), filepath.Join(dest, rel)) {
+			equal, err := fileState(filepath.Join(source, rel), filepath.Join(dest, rel))
+			switch {
+			case err != nil:
+				lines = append(lines, "cannot read: "+rel) // present but uncomparable
+			case !equal:
 				lines = append(lines, "changed: "+rel)
 			}
 		}
@@ -83,13 +88,18 @@ func walkEntries(root string) (map[string]bool, error) {
 	return entries, err
 }
 
-// filesEqual reports whether two files have identical bytes; an unreadable file
-// reads as differing.
-func filesEqual(a, b string) bool {
-	da, ea := os.ReadFile(a)
-	db, eb := os.ReadFile(b)
-	if ea != nil || eb != nil {
-		return false
+// fileState reports whether two files are byte-equal, distinguishing a genuine
+// difference from an inability to read one of them. Collapsing "unreadable" into
+// a false "not equal" would let the caller report a confirmed content change on
+// a file that was never actually compared. [LAW:no-silent-failure]
+func fileState(a, b string) (equal bool, readErr error) {
+	da, err := os.ReadFile(a)
+	if err != nil {
+		return false, err
 	}
-	return bytes.Equal(da, db)
+	db, err := os.ReadFile(b)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(da, db), nil
 }

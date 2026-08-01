@@ -180,6 +180,32 @@ func TestDirectoryComparisonUnreadableTreeIsNotIdentical(t *testing.T) {
 	}
 }
 
+func TestDirectoryComparisonUnreadableFileIsCannotRead(t *testing.T) {
+	// The directory is traversable and the entry is listed, but a regular file
+	// present on both sides cannot be read — that is "cannot read", distinct
+	// from a verified "changed", and never a false claim of identity.
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dst := filepath.Join(dir, "dst")
+	writeFile(t, filepath.Join(src, "f"), []byte("x"))
+	writeFile(t, filepath.Join(dst, "f"), []byte("x"))
+	if err := os.Chmod(filepath.Join(src, "f"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(filepath.Join(src, "f"), 0o644)
+
+	got := Compare(src, dst)
+	if got.Identical {
+		t.Error("a tree with an unreadable file reported identical")
+	}
+	if !strings.Contains(got.Detail, "cannot read: f") {
+		t.Errorf("detail = %q, want it to flag the unreadable file as \"cannot read\"", got.Detail)
+	}
+	if strings.Contains(got.Detail, "changed: f") {
+		t.Errorf("detail = %q, must not label an unreadable file as a verified change", got.Detail)
+	}
+}
+
 func TestParsePlistRejectsOpenStepAndNonPlist(t *testing.T) {
 	// Only XML/binary plists count, matching plistlib; an OpenStep text plist
 	// and plain text are not plists.
