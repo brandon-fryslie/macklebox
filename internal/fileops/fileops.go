@@ -63,7 +63,21 @@ func Copy(src, dst string) error {
 // skipped too. Any other stat error — a permission or I/O failure on a file that
 // really is there — is returned, never swallowed, so a backup cannot silently
 // omit real content. Existing dst-only files are left in place (merge).
+//
+// Because it follows symlinks, a symlink pointing back at an ancestor directory
+// would recurse forever; ancestors tracks the canonical (symlink-resolved) path
+// of every directory on the current descent, and a back-edge into one is skipped
+// to break the cycle. The cyclic target is that ancestor, already copied, so
+// nothing is lost.
 func copyTree(src, dst string) error {
+	real, err := filepath.EvalSymlinks(src)
+	if err != nil {
+		return err
+	}
+	return copyTreeInto(src, dst, map[string]bool{real: true})
+}
+
+func copyTreeInto(src, dst string, ancestors map[string]bool) error {
 	if err := os.MkdirAll(dst, dirMode); err != nil {
 		return err
 	}
@@ -83,7 +97,17 @@ func copyTree(src, dst string) error {
 		}
 		switch {
 		case info.IsDir():
-			if err := copyTree(s, d); err != nil {
+			real, err := filepath.EvalSymlinks(s)
+			if err != nil {
+				return err
+			}
+			if ancestors[real] {
+				continue // a symlink back into an ancestor: skip to break the cycle
+			}
+			ancestors[real] = true
+			err = copyTreeInto(s, d, ancestors)
+			delete(ancestors, real) // backtrack: the set is the current path only
+			if err != nil {
 				return err
 			}
 		case info.Mode().IsRegular():

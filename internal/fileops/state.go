@@ -7,7 +7,11 @@
 // than their own I/O. [LAW:effects-at-boundaries]
 package fileops
 
-import "os"
+import (
+	"errors"
+	"io/fs"
+	"os"
+)
 
 // LinkState is the derived per-file state every sync operation dispatches on
 // (appspec/06). It is modelled once, here, rather than re-derived in each
@@ -97,10 +101,15 @@ func State(homePath, mackupPath string) LinkState {
 		return StateAbsent
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		// A symlink that is not our live link: dangling is broken-link; a live
-		// foreign symlink is present non-mackup content.
+		// A symlink that is not our live link. Only a target that does not exist
+		// is broken-link (dangling); a permission or I/O error means the link is
+		// present but its target cannot be inspected, which is present
+		// non-mackup content, not a diagnosis of absence.
 		if _, err := os.Stat(homePath); err != nil {
-			return StateBrokenLink
+			if errors.Is(err, fs.ErrNotExist) {
+				return StateBrokenLink
+			}
+			return StateRealFilePresent
 		}
 		return StateRealFilePresent
 	}

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func mode(t *testing.T, path string) os.FileMode {
@@ -184,6 +185,34 @@ func TestCopyDirTreeWithInnerSymlinkCopiesItsContent(t *testing.T) {
 	}
 	if got, err := os.ReadFile(filepath.Join(dst, "inner")); err != nil || string(got) != "linked" {
 		t.Errorf("dst/inner = %q, %v; want the symlink target content copied", got, err)
+	}
+}
+
+func TestCopyDirTreeWithSymlinkCycleTerminates(t *testing.T) {
+	// A symlink pointing back into an ancestor must not send copyTree into
+	// infinite recursion; the copy completes and the real files land once.
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	writeFile(t, filepath.Join(src, "real.txt"), "r")
+	writeFile(t, filepath.Join(src, "sub", "deep.txt"), "d")
+	symlink(t, src, filepath.Join(src, "sub", "loop_to_root")) // -> ancestor src
+	symlink(t, "..", filepath.Join(src, "sub", "loop_to_parent"))
+	dst := filepath.Join(dir, "dst")
+
+	done := make(chan error, 1)
+	go func() { done <- Copy(src, dst) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Copy returned an error on a cyclic tree: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Copy did not terminate on a symlink cycle (infinite recursion)")
+	}
+	for _, rel := range []string{"real.txt", "sub/deep.txt"} {
+		if _, err := os.Stat(filepath.Join(dst, filepath.FromSlash(rel))); err != nil {
+			t.Errorf("real file %s missing: %v", rel, err)
+		}
 	}
 }
 
