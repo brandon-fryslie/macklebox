@@ -46,6 +46,9 @@ func TestDroppingAUserDefinitionAddsOneSortedKey(t *testing.T) {
 
 	dropDef(t, home, "zzz-user-app", "[application]\nname = ZZZ User App\n")
 	after := runEnv(t, home, nil, "list")
+	if after.Exit != 0 {
+		t.Fatalf("list after drop exit = %d, want 0; stderr=%q", after.Exit, after.Stderr)
+	}
 	gotKeys, afterCount := listedKeys(t, after.Stdout)
 
 	if afterCount != beforeCount+1 {
@@ -74,6 +77,9 @@ func TestListOutputIsColored(t *testing.T) {
 	home := workingHome(t)
 	dropDef(t, home, "solo", "[application]\nname = Solo\n")
 	r := runEnv(t, home, nil, "list")
+	if r.Exit != 0 {
+		t.Fatalf("list exit = %d, want 0; stderr=%q", r.Exit, r.Stderr)
+	}
 	if !strings.HasPrefix(r.Stdout, "\x1b[33m") {
 		t.Errorf("list stdout is not info-colored: %q", r.Stdout)
 	}
