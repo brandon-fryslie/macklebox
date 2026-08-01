@@ -136,12 +136,14 @@ func LinkWhole(home, mackupFolder string, db appdb.Database, opts Options, conf 
 	if err != nil {
 		return e.fatal(err.Error())
 	}
-	e2 := newEngine("Link", direction{}, home, r.MackupFolder, r.Database, without(r.Scope, "mackup"), opts, conf, stdout, stderr)
-	if ok, code := requireFolder(e2); !ok {
+	// Retarget the same engine at the reloaded config for the second pass, so
+	// any accumulated failures flow through the one finish() below.
+	e.db, e.mackup, e.scope = r.Database, r.MackupFolder, without(r.Scope, "mackup")
+	if ok, code := requireFolder(e); !ok {
 		return code
 	}
-	e2.fanOut(e2.linkFile)
-	return 0
+	e.fanOut(e.linkFile)
+	return e.finish()
 }
 
 // LinkUninstallWhole is the no-application `link uninstall` ceremony (appspec/06
@@ -173,7 +175,7 @@ func LinkUninstallWhole(home, mackupFolder string, db appdb.Database, fullScope 
 	}
 	fmt.Fprintln(stdout, color.Info.Paint(
 		"All your files have been put back in place. You can safely uninstall Mackup now."))
-	return 0
+	return e.finish()
 }
 
 // without returns scope with key removed, preserving order.

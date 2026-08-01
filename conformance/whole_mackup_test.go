@@ -50,8 +50,8 @@ func TestFullUninstallRevertsKeepsStorageAndPrintsClosing(t *testing.T) {
 		t.Fatalf("full uninstall exit = %d, want 0; stderr=%q", r.Exit, r.Stderr)
 	}
 	// The linked file reverted to a real file with the stored content.
-	if info, _ := os.Lstat(filepath.Join(home, ".myapprc")); info.Mode()&os.ModeSymlink != 0 {
-		t.Error("home/.myapprc is still a symlink after full uninstall")
+	if info, err := os.Lstat(filepath.Join(home, ".myapprc")); err != nil || info.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("home/.myapprc is missing or still a symlink after full uninstall: %v", err)
 	}
 	if got, _ := os.ReadFile(filepath.Join(home, ".myapprc")); string(got) != "stored content\n" {
 		t.Errorf("home/.myapprc = %q, want the stored content copied back", got)
@@ -83,8 +83,8 @@ func TestFullUninstallGlobalConfirmationDeclinedDoesNothing(t *testing.T) {
 	if r.Exit != 0 {
 		t.Errorf("declined full uninstall exit = %d, want 0", r.Exit)
 	}
-	if info, _ := os.Lstat(filepath.Join(home, ".myapprc")); info.Mode()&os.ModeSymlink == 0 {
-		t.Error("declined uninstall still reverted the link")
+	if info, err := os.Lstat(filepath.Join(home, ".myapprc")); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("declined uninstall changed the link (err=%v)", err)
 	}
 }
 
