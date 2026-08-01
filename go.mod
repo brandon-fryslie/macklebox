@@ -2,7 +2,11 @@ module github.com/brandon-fryslie/macklebox
 
 go 1.26
 
-require modernc.org/sqlite v1.55.0
+require (
+	github.com/pmezard/go-difflib v1.0.0
+	howett.net/plist v1.0.1
+	modernc.org/sqlite v1.55.0
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

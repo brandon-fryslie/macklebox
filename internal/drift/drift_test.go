@@ -1,0 +1,153 @@
+package drift
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func writeFile(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func xmlPlist(name string) []byte {
+	return []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>Name</key><string>` + name + `</string></dict></plist>`)
+}
+
+func TestEitherSymlinkDiffersWithNoDetail(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real")
+	link := filepath.Join(dir, "link")
+	writeFile(t, real, []byte("x"))
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	// source is a symlink; dest a real file.
+	if got := Compare(link, real); got.Identical || got.Detail != "" {
+		t.Errorf("symlink source = %+v, want {false, \"\"}", got)
+	}
+	// dest is a symlink; source a real file.
+	if got := Compare(real, link); got.Identical || got.Detail != "" {
+		t.Errorf("symlink dest = %+v, want {false, \"\"}", got)
+	}
+}
+
+func TestTypeMismatch(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "file")
+	folder := filepath.Join(dir, "folder")
+	writeFile(t, file, []byte("x"))
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := Compare(folder, file); got.Identical || got.Detail != "type mismatch: folder vs file" {
+		t.Errorf("folder vs file = %+v", got)
+	}
+	if got := Compare(file, folder); got.Identical || got.Detail != "type mismatch: file vs folder" {
+		t.Errorf("file vs folder = %+v", got)
+	}
+}
+
+func TestPlistComparison(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.plist")
+	b := filepath.Join(dir, "b.plist")
+
+	writeFile(t, a, xmlPlist("Vim"))
+	writeFile(t, b, xmlPlist("Vim"))
+	if got := Compare(a, b); !got.Identical {
+		t.Errorf("equal plists: %+v, want identical", got)
+	}
+
+	writeFile(t, b, xmlPlist("Emacs"))
+	got := Compare(a, b)
+	if got.Identical || !strings.Contains(got.Detail, "@@") {
+		t.Errorf("differing plists: %+v, want a unified diff", got)
+	}
+	// The diff is of the parsed structure (JSON), not the raw XML.
+	if !strings.Contains(got.Detail, "Vim") || !strings.Contains(got.Detail, "Emacs") {
+		t.Errorf("plist diff does not show the changed value: %q", got.Detail)
+	}
+}
+
+func TestTextComparison(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a")
+	b := filepath.Join(dir, "b")
+
+	writeFile(t, a, []byte("line one\nline two\n"))
+	writeFile(t, b, []byte("line one\nline two\n"))
+	if got := Compare(a, b); !got.Identical {
+		t.Errorf("equal text: %+v, want identical", got)
+	}
+
+	writeFile(t, b, []byte("line one\nline CHANGED\n"))
+	got := Compare(a, b)
+	if got.Identical || !strings.Contains(got.Detail, "-line two") || !strings.Contains(got.Detail, "+line CHANGED") {
+		t.Errorf("differing text: %+v, want a unified line diff", got)
+	}
+}
+
+func TestBinaryComparison(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a")
+	b := filepath.Join(dir, "b")
+
+	writeFile(t, a, []byte{0xff, 0xfe, 0x00, 0x01})
+	writeFile(t, b, []byte{0xff, 0xfe, 0x00, 0x01})
+	if got := Compare(a, b); !got.Identical {
+		t.Errorf("equal binary: %+v, want identical", got)
+	}
+
+	writeFile(t, b, []byte{0xff, 0xfe, 0x00, 0x02})
+	if got := Compare(a, b); got.Identical || got.Detail != "binary contents differ" {
+		t.Errorf("differing binary: %+v, want \"binary contents differ\"", got)
+	}
+}
+
+func TestDirectoryComparison(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dst := filepath.Join(dir, "dst")
+
+	// identical trees
+	writeFile(t, filepath.Join(src, "same.txt"), []byte("s"))
+	writeFile(t, filepath.Join(dst, "same.txt"), []byte("s"))
+	if got := Compare(src, dst); !got.Identical {
+		t.Errorf("identical dirs: %+v, want identical", got)
+	}
+
+	// introduce a change, a source-only file, and a target-only file
+	writeFile(t, filepath.Join(src, "same.txt"), []byte("changed"))
+	writeFile(t, filepath.Join(src, "only_src.txt"), []byte("x"))
+	writeFile(t, filepath.Join(dst, "only_dst.txt"), []byte("y"))
+
+	got := Compare(src, dst)
+	want := "changed: same.txt\nonly in source: only_src.txt\nonly in target: only_dst.txt\n"
+	if got.Identical || got.Detail != want {
+		t.Errorf("differing dirs detail =\n%q\nwant\n%q", got.Detail, want)
+	}
+}
+
+func TestParsePlistRejectsOpenStepAndNonPlist(t *testing.T) {
+	// Only XML/binary plists count, matching plistlib; an OpenStep text plist
+	// and plain text are not plists.
+	if _, ok := parsePlist([]byte(`{ Name = "Vim"; }`)); ok {
+		t.Error("OpenStep-format text parsed as a plist; want rejected")
+	}
+	if _, ok := parsePlist([]byte("just some config text\n")); ok {
+		t.Error("plain text parsed as a plist")
+	}
+	if _, ok := parsePlist(xmlPlist("Vim")); !ok {
+		t.Error("XML plist not recognized as a plist")
+	}
+}
