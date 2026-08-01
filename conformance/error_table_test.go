@@ -7,8 +7,13 @@ import (
 
 // This file closes the appspec/07 error-table rows whose conformance case was
 // otherwise only proven at unit level. The unguarded regime's contract is stream
-// + exit + no-partial-effect, not wording (appspec/07): each case asserts a
-// nonzero exit, an empty stdout, and a non-empty stderr diagnostic.
+// + exit + no-partial-effect, not wording (appspec/07). The config/assembly
+// failures fail before any command output, so assertUnguarded checks the full
+// nonzero-exit / empty-stdout / non-empty-stderr shape. The link-operation
+// failure is different: it prints a progress line before failing, so appspec/07's
+// "no stdout for the failing operation" means no NEW output past the failure —
+// that case asserts the nonzero exit, the stderr diagnostic, and no partial
+// effect, but not an empty stdout.
 
 func assertUnguarded(t *testing.T, r result) {
 	t.Helper()
@@ -65,6 +70,9 @@ func TestFailureInsideLinkOperationStopsTheRunUncaught(t *testing.T) {
 	r := runEnv(t, home, nil, "--force", "link", "install", "myapp")
 	if r.Exit == 0 {
 		t.Errorf("exit = 0, want nonzero (link failure stops the run)")
+	}
+	if r.Stderr == "" {
+		t.Errorf("stderr empty, want the uncaught diagnostic")
 	}
 	// The home file is untouched — the copy failed before the delete+symlink.
 	info, err := os.Lstat(homeFile)
