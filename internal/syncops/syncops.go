@@ -128,7 +128,7 @@ func LinkWhole(home, mackupFolder string, db appdb.Database, opts Options, conf 
 	if ok, code := requireFolder(e); !ok {
 		return code
 	}
-	if _, ok := db.Lookup("mackup"); ok {
+	if _, ok := e.db.Lookup("mackup"); ok {
 		e.fanOut(e.linkFile) // mackup first
 	}
 
@@ -169,7 +169,7 @@ func LinkUninstallWhole(home, mackupFolder string, db appdb.Database, fullScope 
 	}
 	e.scope = without(fullScope, "mackup")
 	e.fanOut(e.linkUninstallFile)
-	if _, ok := db.Lookup("mackup"); ok {
+	if _, ok := e.db.Lookup("mackup"); ok {
 		e.scope = []string{"mackup"} // mackup last
 		e.fanOut(e.linkUninstallFile)
 	}
