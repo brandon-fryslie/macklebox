@@ -67,7 +67,10 @@ func TestFailureInsideLinkOperationStopsTheRunUncaught(t *testing.T) {
 		t.Errorf("exit = 0, want nonzero (link failure stops the run)")
 	}
 	// The home file is untouched — the copy failed before the delete+symlink.
-	if info, err := os.Lstat(homeFile); err != nil || info.Mode()&os.ModeSymlink != 0 {
-		t.Errorf("home file changed despite the failed link: %v", err)
+	info, err := os.Lstat(homeFile)
+	if err != nil {
+		t.Errorf("home file is gone despite the failed link: %v", err)
+	} else if info.Mode()&os.ModeSymlink != 0 {
+		t.Error("home file became a symlink despite the failed link")
 	}
 }
