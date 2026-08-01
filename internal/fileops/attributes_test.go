@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"testing"
 )
 
@@ -29,31 +28,31 @@ func TestAttributeCleanupCommandsPerPlatform(t *testing.T) {
 }
 
 func TestAttributeInvocationsGateOnPresenceAndAppendPath(t *testing.T) {
-	path := "/some/target"
-	invs := attributeInvocations(runtime.GOOS, path)
+	all := func(string) bool { return true }
+	none := func(string) bool { return false }
+	path := "/some/-target" // a leading-dash basename is fine: the full path is absolute
 
-	// Every invocation names a present binary and ends with the path.
-	for _, argv := range invs {
-		if !binaryExists(argv[0]) {
-			t.Errorf("invocation %v names an absent binary", argv)
-		}
-		if argv[len(argv)-1] != path {
-			t.Errorf("invocation %v does not end with the path", argv)
-		}
+	// All present: every platform command, with path appended.
+	if got := attributeInvocations("darwin", path, all); !reflect.DeepEqual(got, [][]string{
+		{"/bin/chmod", "-R", "-N", path},
+		{"/usr/bin/chflags", "-R", "nouchg", path},
+	}) {
+		t.Errorf("darwin/all = %v", got)
 	}
-	// The count is exactly the present-binary subset of the platform's commands.
-	present := 0
-	for _, c := range attributeCleanupCommands(runtime.GOOS) {
-		if binaryExists(c.bin) {
-			present++
-		}
+	// None present: no invocations.
+	if got := attributeInvocations("linux", path, none); got != nil {
+		t.Errorf("linux/none = %v, want none", got)
 	}
-	if len(invs) != present {
-		t.Errorf("got %d invocations, want %d (present binaries)", len(invs), present)
+	// Gating: only the present binary is invoked.
+	onlySetfacl := func(bin string) bool { return bin == "/bin/setfacl" }
+	if got := attributeInvocations("linux", path, onlySetfacl); !reflect.DeepEqual(got, [][]string{
+		{"/bin/setfacl", "-R", "-b", path},
+	}) {
+		t.Errorf("linux/only-setfacl = %v", got)
 	}
-	// An unknown platform has no commands, so no invocations.
-	if inv := attributeInvocations("plan9", path); inv != nil {
-		t.Errorf("plan9 invocations = %v, want none", inv)
+	// Unknown platform: no commands, so no invocations regardless of the oracle.
+	if got := attributeInvocations("plan9", path, all); got != nil {
+		t.Errorf("plan9 = %v, want none", got)
 	}
 }
 

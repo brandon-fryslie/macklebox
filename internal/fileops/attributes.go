@@ -33,15 +33,16 @@ func attributeCleanupCommands(goos string) []attrCommand {
 	return nil
 }
 
-// attributeInvocations is the pure decision behind removeAttributes: the exact
-// argv of each cleanup command that will actually run for path on this platform
-// — the platform's commands whose binary is present, each with path appended.
-// Separating the decision from the subprocess keeps command selection and
-// existence gating testable without a mutable exec seam. [LAW:effects-at-boundaries]
-func attributeInvocations(goos, path string) [][]string {
+// attributeInvocations is the pure decision behind removeAttributes: given the
+// platform and which binaries are present, the exact argv of each cleanup
+// command that will run for path — the platform's commands whose binary is
+// present, each with path appended. present is injected (binaryExists in
+// production) so this is a pure function of its inputs, testable with a fake
+// presence oracle and no filesystem. [LAW:effects-at-boundaries]
+func attributeInvocations(goos, path string, present func(string) bool) [][]string {
 	var invocations [][]string
 	for _, c := range attributeCleanupCommands(goos) {
-		if !binaryExists(c.bin) {
+		if !present(c.bin) {
 			continue // the binary is absent on this system; skip this step
 		}
 		invocations = append(invocations, append(append([]string{c.bin}, c.args...), path))
@@ -60,7 +61,7 @@ func attributeInvocations(goos, path string) [][]string {
 // real failure, if any, surfaces at the subsequent chmod or remove.
 // [LAW:no-silent-failure] exception: best-effort per appspec/06.
 func removeAttributes(path string) {
-	for _, argv := range attributeInvocations(runtime.GOOS, path) {
+	for _, argv := range attributeInvocations(runtime.GOOS, path, binaryExists) {
 		_ = exec.Command(argv[0], argv[1:]...).Run()
 	}
 }

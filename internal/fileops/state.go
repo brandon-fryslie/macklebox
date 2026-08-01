@@ -101,15 +101,16 @@ func State(homePath, mackupPath string) LinkState {
 		return StateAbsent
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		// A symlink that is not our live link. Only a target that does not exist
-		// is broken-link (dangling); a permission or I/O error means the link is
-		// present but its target cannot be inspected, which is present
-		// non-mackup content, not a diagnosis of absence.
-		if _, err := os.Stat(homePath); err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				return StateBrokenLink
-			}
-			return StateRealFilePresent
+		// A symlink that is not our live link. Only a target that genuinely does
+		// not exist (ENOENT) is broken-link — a diagnosis of absence. Any other
+		// stat failure — a permission or I/O error, or a symlink cycle (ELOOP,
+		// which fs.ErrNotExist does not match) — leaves the link present but
+		// unresolvable-here; it stays real-file-present on purpose. broken-link
+		// invites an operation to skip the path as dangling; real-file-present
+		// makes the operation act on it and fail loudly (Copy/Clamp surface the
+		// ELOOP or permission error) rather than silently dropping it.
+		if _, err := os.Stat(homePath); errors.Is(err, fs.ErrNotExist) {
+			return StateBrokenLink
 		}
 		return StateRealFilePresent
 	}
