@@ -106,8 +106,30 @@ func runCommand(cmd Command, stdin io.Reader, stdout, stderr io.Writer) int {
 		case VerbLinkInstall:
 			return syncops.LinkInstall(home, folder, db, scope, opts, conf, stdout, stderr)
 		case VerbLink:
+			// No application named triggers whole-Mackup mode: link mackup, then
+			// reload config+db so the shared config governs the rest (appspec/06).
+			if cmd.App == "" {
+				reload := func() (syncops.Reloaded, error) {
+					cfg2, err := config.Load(env, cmd.ConfigFile)
+					if err != nil {
+						return syncops.Reloaded{}, err
+					}
+					db2 := appdb.Assemble(home, env.XDGConfigHome, catalog.FS())
+					return syncops.Reloaded{
+						MackupFolder: cfg2.MackupFolder(),
+						Database:     db2,
+						Scope:        cfg2.Scope(db2.Keys()),
+					}, nil
+				}
+				return syncops.LinkWhole(home, folder, db, opts, conf, stdout, stderr, reload)
+			}
 			return syncops.Link(home, folder, db, scope, opts, conf, stdout, stderr)
 		case VerbLinkUninstall:
+			// No application named triggers the full-uninstall ceremony
+			// (appspec/06 whole-Mackup mode); scope is the configured set.
+			if cmd.App == "" {
+				return syncops.LinkUninstallWhole(home, folder, db, scope, opts, conf, stdout, stderr)
+			}
 			return syncops.LinkUninstall(home, folder, db, scope, opts, conf, stdout, stderr)
 		default:
 			// The outer case admits exactly the five verbs above; a sixth added

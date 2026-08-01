@@ -109,6 +109,86 @@ func LinkUninstall(home, mackupFolder string, db appdb.Database, scope []string,
 	return e.execute(requireFolder, e.linkUninstallFile)
 }
 
+// Reloaded is the config+database re-read the whole-Mackup link ceremony performs
+// after linking the mackup application, so the just-linked shared config governs
+// the rest of the run (appspec/01 §7). It is supplied by the caller, which owns
+// the config-loading machinery. [LAW:effects-at-boundaries]
+type Reloaded struct {
+	MackupFolder string
+	Database     appdb.Database
+	Scope        []string // the reloaded configured set (may include mackup)
+}
+
+// LinkWhole is the no-application `link` ceremony (appspec/06 whole-Mackup mode):
+// link the mackup application first, reload the config and database via reload
+// (the just-linked shared config may have changed the scope or storage), then
+// link the reloaded configured set with mackup excluded (it was linked first).
+func LinkWhole(home, mackupFolder string, db appdb.Database, opts Options, conf *Confirmer, stdout, stderr io.Writer, reload func() (Reloaded, error)) int {
+	e := newEngine("Link", direction{}, home, mackupFolder, db, []string{"mackup"}, opts, conf, stdout, stderr)
+	if ok, code := requireFolder(e); !ok {
+		return code
+	}
+	if _, ok := e.db.Lookup("mackup"); ok {
+		e.fanOut(e.linkFile) // mackup first
+	}
+
+	r, err := reload()
+	if err != nil {
+		return e.fatal(err.Error())
+	}
+	// Retarget the same engine at the reloaded config for the second pass, so
+	// any accumulated failures flow through the one finish() below.
+	e.db, e.mackup, e.scope = r.Database, r.MackupFolder, without(r.Scope, "mackup")
+	if ok, code := requireFolder(e); !ok {
+		return code
+	}
+	e.fanOut(e.linkFile)
+	return e.finish()
+}
+
+// LinkUninstallWhole is the no-application `link uninstall` ceremony (appspec/06
+// whole-Mackup mode): a global confirmation, then uninstall the configured set
+// with mackup excluded, then uninstall mackup last (self-last, so the config
+// survives until the end), then the closing message. fullScope is the configured
+// set (it may include mackup). The Mackup folder in storage is deliberately NOT
+// deleted — a cross-machine safety contract (appspec/06 step 6, appspec/01 §2).
+func LinkUninstallWhole(home, mackupFolder string, db appdb.Database, fullScope []string, opts Options, conf *Confirmer, stdout, stderr io.Writer) int {
+	e := newEngine("Link uninstall", direction{}, home, mackupFolder, db, nil, opts, conf, stdout, stderr)
+	if ok, code := requireFolder(e); !ok {
+		return code
+	}
+	// Global confirmation, unless dry-run proceeds; a force policy pre-answers it.
+	if !opts.DryRun {
+		yes, err := conf.ask("Mackup is going to unlink every configuration file it manages and copy each back to its original place in your home folder.\nAre you sure?")
+		if err != nil {
+			panic(err)
+		}
+		if !yes {
+			return 0 // declined: nothing happens
+		}
+	}
+	e.scope = without(fullScope, "mackup")
+	e.fanOut(e.linkUninstallFile)
+	if _, ok := e.db.Lookup("mackup"); ok {
+		e.scope = []string{"mackup"} // mackup last
+		e.fanOut(e.linkUninstallFile)
+	}
+	fmt.Fprintln(stdout, color.Info.Paint(
+		"All your files have been put back in place. You can safely uninstall Mackup now."))
+	return e.finish()
+}
+
+// without returns scope with key removed, preserving order.
+func without(scope []string, key string) []string {
+	out := make([]string, 0, len(scope))
+	for _, k := range scope {
+		if k != key {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
 func newEngine(opName string, dir direction, home, mackupFolder string, db appdb.Database, scope []string, opts Options, conf *Confirmer, stdout, stderr io.Writer) *engine {
 	return &engine{
 		opName: opName, dir: dir, home: home, mackup: mackupFolder, db: db,
@@ -129,9 +209,15 @@ func (e *engine) execute(g gate, perFile func(rel string)) int {
 	if ok, code := g(e); !ok {
 		return code
 	}
-	// appspec/01 §1: applications in sorted key order, files within each in
-	// sorted order (scope is pre-sorted; Files() is sorted); each handled
-	// independently.
+	e.fanOut(perFile)
+	return e.finish()
+}
+
+// fanOut runs perFile over every file of every application in the current scope,
+// in appspec/01 §1 order: applications in sorted key order, files within each in
+// sorted order (scope is pre-sorted; Files() is sorted); each handled
+// independently.
+func (e *engine) fanOut(perFile func(rel string)) {
 	for _, key := range e.scope {
 		app, ok := e.db.Lookup(key)
 		if !ok {
@@ -144,7 +230,6 @@ func (e *engine) execute(g gate, perFile func(rel string)) int {
 			perFile(rel)
 		}
 	}
-	return e.finish()
 }
 
 // copyFile is the shared per-file procedure of appspec/06 §"The shared per-file
