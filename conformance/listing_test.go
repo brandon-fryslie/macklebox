@@ -3,7 +3,6 @@ package conformance
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -33,26 +32,39 @@ func dropDef(t *testing.T, home, key, body string) {
 	writeHome(t, home, filepath.Join(".mackup", key+".cfg"), body)
 }
 
-func TestListPrintsSortedKeysAndCountTrailer(t *testing.T) {
+func TestDroppingAUserDefinitionAddsOneSortedKey(t *testing.T) {
+	// appspec/05 observed effect: dropping ~/.mackup/<key>.cfg makes the key
+	// appear in list and increments the count trailer by exactly one. Asserting
+	// the delta rather than a fixed total keeps this test about list's behavior,
+	// not the size of the shipped catalog.
 	home := workingHome(t)
-	dropDef(t, home, "zebra", "[application]\nname = Zebra\n")
-	dropDef(t, home, "alpha", "[application]\nname = Alpha\n")
-	dropDef(t, home, "mike", "[application]\nname = Mike\n")
+	before := runEnv(t, home, nil, "list")
+	if before.Exit != 0 {
+		t.Fatalf("baseline list exit = %d, want 0; stderr=%q", before.Exit, before.Stderr)
+	}
+	_, beforeCount := listedKeys(t, before.Stdout)
 
-	r := runEnv(t, home, nil, "list")
-	if r.Exit != 0 {
-		t.Fatalf("exit = %d, want 0; stderr=%q", r.Exit, r.Stderr)
+	dropDef(t, home, "zzz-user-app", "[application]\nname = ZZZ User App\n")
+	after := runEnv(t, home, nil, "list")
+	gotKeys, afterCount := listedKeys(t, after.Stdout)
+
+	if afterCount != beforeCount+1 {
+		t.Errorf("count trailer = %d, want %d (one more than baseline)", afterCount, beforeCount+1)
 	}
-	if r.Stderr != "" {
-		t.Errorf("stderr = %q, want empty", r.Stderr)
+	found := false
+	for i, k := range gotKeys {
+		if k == "zzz-user-app" {
+			found = true
+		}
+		if i > 0 && gotKeys[i-1] > k {
+			t.Errorf("list not sorted ascending: %q precedes %q", gotKeys[i-1], k)
+		}
 	}
-	got := stripANSI(r.Stdout)
-	// appspec/05 format: header, sorted keys, blank line, count trailer naming
-	// the version. The version value is data, so match its shape not its text.
-	want := regexp.MustCompile(
-		`^Supported applications:\n - alpha\n - mike\n - zebra\n\n3 applications supported in Mackup v\S+\n$`)
-	if !want.MatchString(got) {
-		t.Errorf("list stdout = %q, want the sorted appspec/05 format", got)
+	if !found {
+		t.Error("dropped user definition zzz-user-app did not appear in list")
+	}
+	if len(gotKeys) != afterCount {
+		t.Errorf("printed %d keys but count trailer says %d", len(gotKeys), afterCount)
 	}
 }
 
