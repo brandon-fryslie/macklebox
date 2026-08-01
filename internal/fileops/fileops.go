@@ -1,6 +1,7 @@
 package fileops
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -55,10 +56,13 @@ func Copy(src, dst string) error {
 // entry by os.Stat, which follows symlinks, so a symlinked file has its target
 // content copied and a symlinked subdirectory is descended into — the reference's
 // dereferencing behavior — rather than dropped. os.ReadDir likewise follows src
-// itself when src is a symlink to a directory. Entries with no file content — a
-// dangling symlink (Stat fails) or a special file such as a device or socket —
-// are skipped, the only sensible action and consistent with the clamp's
-// broken-symlink skip; existing dst-only files are left in place (merge).
+// itself when src is a symlink to a directory. An entry whose target does not
+// exist — a dangling symlink or one that vanished between readdir and stat — is
+// genuinely nothing to copy and is skipped, consistent with the clamp's
+// broken-symlink rule; a special file (device, socket) has no content and is
+// skipped too. Any other stat error — a permission or I/O failure on a file that
+// really is there — is returned, never swallowed, so a backup cannot silently
+// omit real content. Existing dst-only files are left in place (merge).
 func copyTree(src, dst string) error {
 	if err := os.MkdirAll(dst, dirMode); err != nil {
 		return err
@@ -71,8 +75,11 @@ func copyTree(src, dst string) error {
 		s := filepath.Join(src, entry.Name())
 		d := filepath.Join(dst, entry.Name())
 		info, err := os.Stat(s) // follow symlinks; classify by the target
-		if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
 			continue // dangling symlink or vanished entry: nothing to copy
+		}
+		if err != nil {
+			return err // a real failure (permission, I/O): surface it
 		}
 		switch {
 		case info.IsDir():

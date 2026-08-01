@@ -59,6 +59,46 @@ func TestCopyDirectoryTreeClampsRecursivelyAndMerges(t *testing.T) {
 	}
 }
 
+func TestCopyOverwritesExistingDestination(t *testing.T) {
+	// The incremental-sync path: dst already exists and Copy replaces it with the
+	// current source content, clamped.
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	writeFile(t, src, "new content")
+	dst := filepath.Join(dir, "dst")
+	writeFile(t, dst, "stale content that is longer than the new one")
+
+	if err := Copy(src, dst); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(dst); err != nil || string(got) != "new content" {
+		t.Errorf("dst = %q, %v; want the new content with the old gone", got, err)
+	}
+	if m := mode(t, dst); m != fileMode {
+		t.Errorf("dst mode = %o, want %o", m, fileMode)
+	}
+}
+
+func TestCopyDirTreeSkipsDanglingInnerSymlink(t *testing.T) {
+	// A dangling symlink inside the tree is genuinely nothing to copy; it is
+	// skipped and the copy of the real files still succeeds.
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	writeFile(t, filepath.Join(src, "real.txt"), "r")
+	symlink(t, filepath.Join(dir, "nowhere"), filepath.Join(src, "dangling"))
+	dst := filepath.Join(dir, "dst")
+
+	if err := Copy(src, dst); err != nil {
+		t.Fatalf("Copy failed on a tree with a dangling symlink: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "real.txt")); err != nil {
+		t.Errorf("real file not copied: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(dst, "dangling")); !os.IsNotExist(err) {
+		t.Error("dangling symlink should not have been copied")
+	}
+}
+
 func TestCopyLeavesDestinationUntouchedOnFailure(t *testing.T) {
 	// The atomic overwrite: when the copy cannot complete, an existing dst keeps
 	// its original content rather than being truncated (appspec/07: a failing
