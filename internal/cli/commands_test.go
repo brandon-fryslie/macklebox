@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/brandon-fryslie/macklebox/internal/config"
@@ -57,7 +58,13 @@ func TestCheckEnvironmentStorageRootMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = checkEnvironment(cfg, false, 1000)
-	if err == nil || !filepath.IsAbs(cfg.Root()) {
-		t.Fatalf("want a storage-folder error naming the root; got err=%v root=%q", err, cfg.Root())
+	if err == nil {
+		t.Fatal("missing storage root: want an error, got nil")
+	}
+	// The error must be the storage-folder gate error and must name the
+	// resolved root — appspec/07 "naming the value". [LAW:verifiable-goals]
+	if !strings.Contains(err.Error(), "Unable to find the storage folder") ||
+		!strings.Contains(err.Error(), cfg.Root()) {
+		t.Errorf("error = %q, want the storage-folder error naming the root %q", err, cfg.Root())
 	}
 }
