@@ -170,6 +170,33 @@ func TestFailedReplaceLeavesTheOldCopyIntact(t *testing.T) {
 	}
 }
 
+func TestReplaceFailsWhenSourceUnreadableAndPreservesOldCopy(t *testing.T) {
+	// The staging copy fails (unreadable source) after MkdirTemp succeeds: the
+	// old destination copy must survive and the run must report the failure.
+	home, mackup, homeFile := seedApp(t)
+	runEnv(t, home, nil, "--force", "backup", "myapp") // mackup/.myapprc = v1
+	if err := os.WriteFile(homeFile, []byte("config v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(homeFile, 0o000); err != nil { // unreadable source
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chmod(homeFile, 0o644); err != nil {
+			t.Logf("cleanup chmod failed: %v", err)
+		}
+	}()
+
+	r := runEnv(t, home, nil, "--force", "backup", "myapp")
+	if r.Exit != 1 {
+		t.Errorf("exit = %d, want 1 (staging copy failed)", r.Exit)
+	}
+	got, err := os.ReadFile(filepath.Join(mackup, ".myapprc"))
+	if err != nil || string(got) != "config v1\n" {
+		t.Errorf("old copy = %q, %v; want v1 preserved after a failed staging copy", got, err)
+	}
+}
+
 func TestBackupFolderCreationDeclineIsFatal(t *testing.T) {
 	home, _, _ := seedApp(t)
 	// --force-no answers the folder-creation prompt with no.
