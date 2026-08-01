@@ -89,7 +89,7 @@ func runCommand(cmd Command, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runList(db, stdout)
 	case VerbShow:
 		return runShow(db, cmd.App, stdout, stderr)
-	case VerbBackup, VerbRestore, VerbLinkInstall:
+	case VerbBackup, VerbRestore, VerbLinkInstall, VerbLink:
 		scope, ok := resolveScope(cmd.App, cfg, db, stderr)
 		if !ok {
 			return 1 // an unknown named application (message already written)
@@ -103,8 +103,15 @@ func runCommand(cmd Command, stdin io.Reader, stdout, stderr io.Writer) int {
 			return syncops.Backup(home, folder, db, scope, opts, conf, stdout, stderr)
 		case VerbRestore:
 			return syncops.Restore(home, folder, db, scope, opts, conf, stdout, stderr)
-		default:
+		case VerbLinkInstall:
 			return syncops.LinkInstall(home, folder, db, scope, opts, conf, stdout, stderr)
+		case VerbLink:
+			return syncops.Link(home, folder, db, scope, opts, conf, stdout, stderr)
+		default:
+			// The outer case admits exactly the four verbs above; a fifth added
+			// there without a dispatch here must fail loudly, not run the wrong
+			// operation. [LAW:no-silent-failure]
+			panic("cli: sync verb without a dispatch: " + cmd.Verb.String())
 		}
 	default:
 		return fatal(stderr, "the "+cmd.Verb.String()+" command is not implemented yet")

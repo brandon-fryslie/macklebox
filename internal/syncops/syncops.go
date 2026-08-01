@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/brandon-fryslie/macklebox/internal/appdb"
 	"github.com/brandon-fryslie/macklebox/internal/color"
@@ -89,6 +90,14 @@ func Restore(home, mackupFolder string, db appdb.Database, scope []string, opts 
 func LinkInstall(home, mackupFolder string, db appdb.Database, scope []string, opts Options, conf *Confirmer, stdout, stderr io.Writer) int {
 	e := newEngine("Link install", direction{}, home, mackupFolder, db, scope, opts, conf, stdout, stderr)
 	return e.execute(ensureFolder, e.linkInstallFile)
+}
+
+// Link is the join-an-existing-sync path (appspec/06 "link"): symlink files that
+// already live in the Mackup folder into home, moving nothing out of home. It
+// requires the Mackup folder to already exist.
+func Link(home, mackupFolder string, db appdb.Database, scope []string, opts Options, conf *Confirmer, stdout, stderr io.Writer) int {
+	e := newEngine("Link", direction{}, home, mackupFolder, db, scope, opts, conf, stdout, stderr)
+	return e.execute(requireFolder, e.linkFile)
 }
 
 func newEngine(opName string, dir direction, home, mackupFolder string, db appdb.Database, scope []string, opts Options, conf *Confirmer, stdout, stderr io.Writer) *engine {
@@ -269,6 +278,69 @@ func (e *engine) linkInstallTrace(home, mackup string) {
 	default:
 		e.trace("Doing nothing, " + home + " does not exist")
 	}
+}
+
+// linkFile is the per-file procedure of appspec/06 "link": symlink a file that
+// already exists in the Mackup folder into home, moving nothing out of home
+// (the second-machine door, distinct by contract from link install). Unlike the
+// copy family, a link failure is uncaught and stops the run (appspec/06
+// partial-failure).
+func (e *engine) linkFile(rel string) {
+	home := filepath.Join(e.home, rel)
+	mackup := filepath.Join(e.mackup, rel)
+
+	// 1. Act only if the Mackup copy exists as real content, home is not already
+	//    our link, and the platform permits syncing this path.
+	if !existsFileOrDir(mackup) || fileops.AlreadyLinked(home, mackup) || !linkAllowedOnPlatform(runtime.GOOS, e.home, home) {
+		e.trace("Doing nothing for " + home)
+		return
+	}
+	// 2. Progress.
+	if e.opts.Verbose {
+		fmt.Fprintln(e.stdout, color.Info.Paint("Restoring\n  linking "+home+"\n  to      "+mackup+" ..."))
+	} else {
+		fmt.Fprintln(e.stdout, color.Info.Paint("Restoring "+rel+" ..."))
+	}
+	if e.opts.DryRun {
+		return
+	}
+	// 3. If anything is at the home path, confirm replacing it. On yes, remove it
+	//    first so the symlink can be created in its place.
+	if fileops.PathExists(home) {
+		yes, err := e.conf.ask(fmt.Sprintf(
+			"You already have a %s at %s. Do you want to replace it with your backup?",
+			pathKind(home), home))
+		if err != nil {
+			panic(err)
+		}
+		if !yes {
+			return
+		}
+		if err := fileops.Delete(home); err != nil {
+			panic("link: cannot remove the existing home path " + home + ": " + err.Error())
+		}
+	}
+	// 3/4. Create the symlink into the (unmodified) Mackup copy.
+	if err := fileops.Link(mackup, home); err != nil {
+		panic("link: cannot create the symlink " + home + ": " + err.Error())
+	}
+}
+
+// linkAllowedOnPlatform applies appspec/06's platform rule, stated in the link
+// section: on Linux a home path under ~/Library/ is not linked (skipped); macOS
+// has no such restriction. The rule is specific to link because link is the one
+// command driven by the Mackup copy — which exists — so on Linux it could
+// otherwise create a symlink under ~/Library, a directory that is meaningless
+// there. Backup, restore, and link install are driven by the home/source file,
+// which does not exist under ~/Library on Linux, so their existence guard skips
+// those paths without a platform rule. The platform is a parameter so the rule
+// is testable without the host's GOOS, and it reuses the shared containment
+// predicate (Library is just another base here).
+func linkAllowedOnPlatform(goos, homeDir, homePath string) bool {
+	if goos != "linux" {
+		return true
+	}
+	return !homepath.WithinHome(filepath.Join(homeDir, "Library"), homePath)
 }
 
 // replace overwrites dst with a copy of src using replace (not merge) semantics,
