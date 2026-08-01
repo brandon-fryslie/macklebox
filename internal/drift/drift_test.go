@@ -138,6 +138,48 @@ func TestDirectoryComparison(t *testing.T) {
 	}
 }
 
+func TestDirectoryComparisonNestedAndEmptySubdir(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dst := filepath.Join(dir, "dst")
+
+	// A nested file present on both, identical.
+	writeFile(t, filepath.Join(src, "a", "b", "c.txt"), []byte("x"))
+	writeFile(t, filepath.Join(dst, "a", "b", "c.txt"), []byte("x"))
+	// An empty subdirectory present only on the source side — an entry the
+	// target lacks, so the trees are not identical.
+	if err := os.MkdirAll(filepath.Join(src, "emptysub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got := Compare(src, dst)
+	if got.Identical {
+		t.Error("dirs differing only by an empty subdirectory reported identical")
+	}
+	if !strings.Contains(got.Detail, "only in source: emptysub") {
+		t.Errorf("detail = %q, want it to flag the source-only empty subdir", got.Detail)
+	}
+}
+
+func TestDirectoryComparisonUnreadableTreeIsNotIdentical(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dst := filepath.Join(dir, "dst")
+	writeFile(t, filepath.Join(src, "sub", "f"), []byte("x"))
+	writeFile(t, filepath.Join(dst, "sub", "f"), []byte("x"))
+
+	// Make a source subdirectory unreadable so the walk cannot see its contents.
+	unreadable := filepath.Join(src, "sub")
+	if err := os.Chmod(unreadable, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(unreadable, 0o755)
+
+	if got := Compare(src, dst); got.Identical {
+		t.Error("a tree that could not be fully read was reported identical")
+	}
+}
+
 func TestParsePlistRejectsOpenStepAndNonPlist(t *testing.T) {
 	// Only XML/binary plists count, matching plistlib; an OpenStep text plist
 	// and plain text are not plists.

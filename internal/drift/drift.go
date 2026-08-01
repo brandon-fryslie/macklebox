@@ -76,8 +76,14 @@ func compareFiles(source, dest string) Comparison {
 			if reflect.DeepEqual(srcPlist, dstPlist) {
 				return identical
 			}
-			return Comparison{Identical: false,
-				Detail: unifiedDiff(prettyValue(srcPlist), prettyValue(dstPlist))}
+			// The structures already differ; if either cannot be rendered, the
+			// detail says so rather than an empty diff that would read identical.
+			srcPretty, ok1 := prettyValue(srcPlist)
+			dstPretty, ok2 := prettyValue(dstPlist)
+			if !ok1 || !ok2 {
+				return Comparison{Identical: false, Detail: "plist structures differ"}
+			}
+			return Comparison{Identical: false, Detail: unifiedDiff(srcPretty, dstPretty)}
 		}
 	}
 
@@ -114,24 +120,32 @@ func parsePlist(data []byte) (any, bool) {
 }
 
 // prettyValue renders a parsed structure as deterministic, indented JSON — map
-// keys sorted — so the unified diff of two plists is stable, not reordered.
-func prettyValue(v any) string {
+// keys sorted — so the unified diff of two plists is stable, not reordered. The
+// bool reports whether the render succeeded; a plist parses into only
+// JSON-serializable Go values, so failure is not expected, but the caller must
+// not turn a marshal failure into an empty (identical-looking) diff.
+func prettyValue(v any) (string, bool) {
 	out, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
-		return ""
+		return "", false
 	}
-	return string(out)
+	return string(out), true
 }
 
 // unifiedDiff is a Python-difflib-style unified diff of two texts, labelled
-// source vs target, matching the reference's diff shape.
+// source vs target, matching the reference's diff shape. The generator writes to
+// an in-memory buffer, so its error is not expected; should it occur, a clear
+// marker is returned rather than an empty string that would read as identical.
 func unifiedDiff(a, b string) string {
-	text, _ := difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
+	text, err := difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
 		A:        difflib.SplitLines(a),
 		B:        difflib.SplitLines(b),
 		FromFile: "source",
 		ToFile:   "target",
 		Context:  3,
 	})
+	if err != nil {
+		return "diff unavailable"
+	}
 	return text
 }
