@@ -2,35 +2,31 @@
 // the program — the third, lowest-precedence discovery tier of appspec/05. It
 // is the injection point the cli pipeline hands to appdb.Assemble.
 //
-// The catalog is empty until aol.4 ships the definition files; that ticket
-// replaces FS's body with an embedded filesystem (go:embed) and changes
-// nothing else, because the consumer only needs an fs.FS whose root holds
-// <key>.cfg files.
+// The definition files under defs/ are project-authored data (appspec/appendix
+// records only the keys; this is an MIT clean-room build, so no reference data
+// is copied). Every appendix key has a name-only definition — a valid, listable,
+// showable entry with an empty file set (appspec/05) — except the hand-authored
+// mackup self-definition, which carries the file set whole-Mackup mode needs
+// (appspec/06). The defs/ files are the source of truth: later tickets grow file
+// sets by editing individual definitions.
 package catalog
 
-import "io/fs"
+import (
+	"embed"
+	"io/fs"
+)
+
+//go:embed defs/*.cfg
+var defsFS embed.FS
 
 // FS returns the built-in definitions as an fs.FS whose root holds the
-// definition files. Empty for now — an empty root reads as "no built-in
-// applications", which appdb.Assemble handles like any empty tier.
-func FS() fs.FS { return emptyFS{} }
-
-// emptyFS is an fs.FS with an existing but empty root directory, so
-// appdb.Assemble reads zero built-in definitions rather than treating the tier
-// as a missing directory. It satisfies fs.ReadDirFS; Open exists only to
-// complete the fs.FS interface and is never reached while the root is empty.
-type emptyFS struct{}
-
-// ReadDir reports the root as an empty directory and every other path as
-// nonexistent — reporting "empty" for a path that does not exist would be a
-// silent failure of the fs contract. [LAW:no-silent-failure]
-func (emptyFS) ReadDir(name string) ([]fs.DirEntry, error) {
-	if name != "." {
-		return nil, &fs.PathError{Op: "readdir", Path: name, Err: fs.ErrNotExist}
+// <key>.cfg files, matching the shape appdb.Assemble reads. The embed subtree
+// is compiled in, so a missing defs/ root is a build/programming error, not a
+// runtime condition — hence the panic rather than a returned error.
+func FS() fs.FS {
+	sub, err := fs.Sub(defsFS, "defs")
+	if err != nil {
+		panic("catalog: embedded defs subtree missing: " + err.Error())
 	}
-	return nil, nil
-}
-
-func (emptyFS) Open(name string) (fs.File, error) {
-	return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
+	return sub
 }
