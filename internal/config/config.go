@@ -199,13 +199,15 @@ func rejectLegacy(ini sections) error {
 // unguarded fatals; anything else is accepted verbatim. The comparison runs
 // on the cleaned path — filepath.Join normalizes the value onto the disk
 // anyway, so "mackup/applications/" and "./.mackup" are the same collision
-// the constraint forbids, not different values.
+// the constraint forbids, not different values. ToSlash pins the comparison
+// to the spec's forward-slash grammar on every platform — filepath.Clean
+// alone would emit backslashes on Windows and un-match the literals below.
 func directoryName(storage map[string]string) string {
 	dir, ok := storage["directory"]
 	if !ok {
 		return "Mackup"
 	}
-	cleaned := filepath.Clean(dir)
+	cleaned := filepath.ToSlash(filepath.Clean(dir))
 	if cleaned == ".mackup" ||
 		cleaned == "mackup/applications" ||
 		cleaned == ".config/mackup/applications" ||
