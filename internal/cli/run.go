@@ -21,7 +21,8 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stdout, helpText)
 		return 0
 	case Version:
-		fmt.Fprintf(stdout, "Mackup %s\n", versionString())
+		// Info-level per appspec/07: colored unconditionally, even piped.
+		fmt.Fprintln(stdout, info.paint("Mackup "+versionString()))
 		return 0
 	case ShowUsage:
 		fmt.Fprint(stdout, usageText)
@@ -30,7 +31,10 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "mackup: %s\n%s", inv.Warning, usageText)
 		return 1
 	case ForceConflict:
-		fmt.Fprintln(stderr, forceConflictLine)
+		// appspec/02's exit-code table colors every fatal exit-1 diagnostic,
+		// this one included; the verbatim wording contract lives inside the
+		// SGR wrapper.
+		fmt.Fprintln(stderr, fatalError.paint(forceConflictLine))
 		return 1
 	case Command:
 		return runCommand(inv, stdout, stderr)
@@ -45,12 +49,17 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 // --help/--version passes the config-load gate before its subcommand runs.
 func runCommand(cmd Command, stdout, stderr io.Writer) int {
 	if _, err := loadConfig(cmd.ConfigFile); err != nil {
-		// Guarded fatal-error shape per appspec/02 exit-code table: a
-		// diagnostic line on stderr, exit 1, nothing on stdout.
-		fmt.Fprintf(stderr, "Error: %s\n", err)
-		return 1
+		return fatal(stderr, err.Error())
 	}
-	fmt.Fprintf(stderr, "Error: the %s command is not implemented yet\n", cmd.Verb)
+	return fatal(stderr, "the "+cmd.Verb.String()+" command is not implemented yet")
+}
+
+// fatal writes one guarded fatal diagnostic — the `Error: …` line that
+// appspec/07 routes to stderr in bright red — and returns the guarded exit
+// code. Every clean fatal exit goes through here so the shape (prefix, color,
+// stream, code) cannot drift between sites. [LAW:single-enforcer]
+func fatal(stderr io.Writer, msg string) int {
+	fmt.Fprintln(stderr, fatalError.paint("Error: "+msg))
 	return 1
 }
 
