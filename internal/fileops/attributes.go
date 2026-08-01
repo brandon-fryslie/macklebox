@@ -33,28 +33,32 @@ func attributeCleanupCommands(goos string) []attrCommand {
 	return nil
 }
 
-// runAttrCommand executes one attribute-cleanup command, ignoring its result —
-// best-effort. It is a package variable solely so tests can observe which
-// commands removeAttributes spawns without the host needing chmod/setfacl/etc.;
-// production always runs the real subprocess. [LAW:no-shared-mutable-globals]
-// exception: an exec seam with a stable default, overridden only under test.
-var runAttrCommand = func(bin string, args []string) {
-	_ = exec.Command(bin, args...).Run()
+// attributeInvocations is the pure decision behind removeAttributes: the exact
+// argv of each cleanup command that will actually run for path on this platform
+// — the platform's commands whose binary is present, each with path appended.
+// Separating the decision from the subprocess keeps command selection and
+// existence gating testable without a mutable exec seam. [LAW:effects-at-boundaries]
+func attributeInvocations(goos, path string) [][]string {
+	var invocations [][]string
+	for _, c := range attributeCleanupCommands(goos) {
+		if !binaryExists(c.bin) {
+			continue // the binary is absent on this system; skip this step
+		}
+		invocations = append(invocations, append(append([]string{c.bin}, c.args...), path))
+	}
+	return invocations
 }
 
 // removeAttributes strips filesystem attributes that would block a chmod or a
 // delete, by running the platform's cleanup commands recursively on path. It is
 // the precondition shared by Clamp and Delete (appspec/06), so it lives in one
-// place. Each step is best-effort: a step whose binary is absent is skipped, and
-// a command that runs but fails (e.g. no ACL to remove) is ignored — the real
-// failure, if any, surfaces at the subsequent chmod or remove.
-// [LAW:no-silent-failure] exception: best-effort attribute cleanup per appspec/06.
+// place. Each step is best-effort: an absent binary is skipped (by
+// attributeInvocations), and a command that runs but fails (e.g. no ACL to
+// remove) is ignored — the real failure, if any, surfaces at the subsequent
+// chmod or remove. [LAW:no-silent-failure] exception: best-effort per appspec/06.
 func removeAttributes(path string) {
-	for _, c := range attributeCleanupCommands(runtime.GOOS) {
-		if !binaryExists(c.bin) {
-			continue // the binary is absent on this system; skip this step
-		}
-		runAttrCommand(c.bin, append(append([]string{}, c.args...), path))
+	for _, argv := range attributeInvocations(runtime.GOOS, path) {
+		_ = exec.Command(argv[0], argv[1:]...).Run()
 	}
 }
 

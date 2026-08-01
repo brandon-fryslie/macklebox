@@ -27,29 +27,32 @@ func TestAttributeCleanupCommandsPerPlatform(t *testing.T) {
 	}
 }
 
-func TestRemoveAttributesInvokesPresentBinariesOnThePath(t *testing.T) {
-	// Capture what removeAttributes would spawn: every present-binary command of
-	// the current platform, applied to the path with its args; absent binaries
-	// produce no invocation.
-	var got [][]string
-	orig := runAttrCommand
-	runAttrCommand = func(bin string, args []string) {
-		got = append(got, append([]string{bin}, args...))
-	}
-	defer func() { runAttrCommand = orig }()
+func TestAttributeInvocationsGateOnPresenceAndAppendPath(t *testing.T) {
+	path := "/some/target"
+	invs := attributeInvocations(runtime.GOOS, path)
 
-	path := filepath.Join(t.TempDir(), "target")
-	writeFile(t, path, "x")
-	removeAttributes(path)
-
-	var want [][]string
-	for _, c := range attributeCleanupCommands(runtime.GOOS) {
-		if binaryExists(c.bin) {
-			want = append(want, append(append([]string{c.bin}, c.args...), path))
+	// Every invocation names a present binary and ends with the path.
+	for _, argv := range invs {
+		if !binaryExists(argv[0]) {
+			t.Errorf("invocation %v names an absent binary", argv)
+		}
+		if argv[len(argv)-1] != path {
+			t.Errorf("invocation %v does not end with the path", argv)
 		}
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("invocations = %v, want %v", got, want)
+	// The count is exactly the present-binary subset of the platform's commands.
+	present := 0
+	for _, c := range attributeCleanupCommands(runtime.GOOS) {
+		if binaryExists(c.bin) {
+			present++
+		}
+	}
+	if len(invs) != present {
+		t.Errorf("got %d invocations, want %d (present binaries)", len(invs), present)
+	}
+	// An unknown platform has no commands, so no invocations.
+	if inv := attributeInvocations("plan9", path); inv != nil {
+		t.Errorf("plan9 invocations = %v, want none", inv)
 	}
 }
 

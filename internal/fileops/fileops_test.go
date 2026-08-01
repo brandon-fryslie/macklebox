@@ -59,6 +59,32 @@ func TestCopyDirectoryTreeClampsRecursivelyAndMerges(t *testing.T) {
 	}
 }
 
+func TestCopyLeavesDestinationUntouchedOnFailure(t *testing.T) {
+	// The atomic overwrite: when the copy cannot complete, an existing dst keeps
+	// its original content rather than being truncated (appspec/07: a failing
+	// operation makes no filesystem change).
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	writeFile(t, src, "new content")
+	dstDir := filepath.Join(dir, "dstdir")
+	dst := filepath.Join(dstDir, "dst")
+	writeFile(t, dst, "original")
+
+	// A read-only destination directory makes the temp write (and thus the copy)
+	// fail, without failing the earlier parent MkdirAll on the existing dir.
+	if err := os.Chmod(dstDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(dstDir, 0o700) // restore so t.TempDir cleanup can remove it
+
+	if err := Copy(src, dst); err == nil {
+		t.Error("Copy into a read-only directory should return an error")
+	}
+	if got, err := os.ReadFile(dst); err != nil || string(got) != "original" {
+		t.Errorf("dst = %q, %v; want the original content untouched", got, err)
+	}
+}
+
 func TestCopyNonFileNonDirIsError(t *testing.T) {
 	dir := t.TempDir()
 	fifo := filepath.Join(dir, "pipe")

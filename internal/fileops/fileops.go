@@ -21,6 +21,13 @@ const (
 // recursively (merging into any existing dst — same-named files overwritten,
 // dst-only files kept), and the result is permission-clamped. Anything that is
 // neither a regular file nor a directory is an error.
+//
+// A single-file copy is atomic (see copyFile). A directory-tree copy is not: it
+// merges file by file and cannot be swapped atomically without discarding the
+// dst-only files the merge must preserve, so a failure partway leaves a
+// partially merged tree. That is recoverable by re-running, which is the sync
+// engine's recovery model (appspec/00 promise 3, appspec/01 §5 per-file
+// independence) — no rollback, re-run converges.
 func Copy(src, dst string) error {
 	info, err := os.Stat(src) // follow symlinks: classify by what src resolves to
 	if err != nil {
@@ -68,22 +75,38 @@ func copyTree(src, dst string) error {
 	})
 }
 
-// copyFile copies one regular file's contents, overwriting dst if present.
+// copyFile copies one regular file's contents, overwriting dst if present. The
+// write goes to a temporary file in dst's own directory and is renamed into
+// place only on success, so a failure partway through — a read error, a full
+// disk — leaves any existing dst untouched rather than truncated. That keeps the
+// overwrite atomic: a failing copy makes no filesystem change (appspec/07). The
+// temp lives in dst's directory so the rename stays within one filesystem.
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
-	out, err := os.Create(dst)
+
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".mackup-copy-*")
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
+	tmpName := tmp.Name()
+	if _, err := io.Copy(tmp, in); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
 		return err
 	}
-	return out.Close()
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, dst); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return nil
 }
 
 // Delete removes path with the semantics of appspec/06 "delete(path)":

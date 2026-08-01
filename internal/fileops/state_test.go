@@ -117,6 +117,16 @@ func TestState(t *testing.T) {
 				return home, filepath.Join(dir, "storage", "f")
 			},
 		},
+		"real-file-present: real directory": {
+			want: StateRealFilePresent,
+			setup: func(t *testing.T, dir string) (string, string) {
+				home := filepath.Join(dir, "home", "d")
+				if err := os.MkdirAll(home, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				return home, filepath.Join(dir, "storage", "d")
+			},
+		},
 		"real-file-present: live foreign symlink": {
 			want: StateRealFilePresent,
 			setup: func(t *testing.T, dir string) (string, string) {
