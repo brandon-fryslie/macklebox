@@ -35,4 +35,5 @@ go test ./...
 | `appspec/` | The functional specification that drives the build (source of truth) |
 | `cmd/mackup/` | Console entry point (the only code touching real argv/streams/exit) |
 | `internal/cli/` | Invocation grammar, dispatch pipeline, usage/version output |
+| `conformance/` | Black-box rig: runs the built binary under a scratch HOME, asserts stdout/stderr/exit |
 | `LICENSE`  | MIT |
