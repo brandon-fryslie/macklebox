@@ -10,7 +10,7 @@ import (
 func runCLI(t *testing.T, argv ...string) (stdout, stderr string, code int) {
 	t.Helper()
 	var out, err bytes.Buffer
-	code = Run(argv, &out, &err)
+	code = Run(argv, strings.NewReader(""), &out, &err)
 	return out.String(), err.String(), code
 }
 

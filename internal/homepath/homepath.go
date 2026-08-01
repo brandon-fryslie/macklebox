@@ -43,3 +43,10 @@ func IsRegularFile(p string) bool {
 	info, err := os.Stat(p)
 	return err == nil && info.Mode().IsRegular()
 }
+
+// IsDir reports whether p exists and is a directory (following symlinks). Any
+// stat error reads as "not a directory".
+func IsDir(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && info.IsDir()
+}

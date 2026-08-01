@@ -9,7 +9,10 @@ import (
 
 	"github.com/brandon-fryslie/macklebox/internal/appdb"
 	"github.com/brandon-fryslie/macklebox/internal/catalog"
+	"github.com/brandon-fryslie/macklebox/internal/color"
 	"github.com/brandon-fryslie/macklebox/internal/config"
+	"github.com/brandon-fryslie/macklebox/internal/homepath"
+	"github.com/brandon-fryslie/macklebox/internal/syncops"
 )
 
 // forceConflictLine is the exact stderr line appspec/02 "Mutually exclusive
@@ -21,14 +24,14 @@ const forceConflictLine = "Options --force and --force-no are mutually exclusive
 // parse → config load → subcommand. Streams and exit code are parameters so
 // the entire boundary contract is testable in-process.
 // [LAW:effects-at-boundaries]
-func Run(argv []string, stdout, stderr io.Writer) int {
+func Run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	switch inv := Parse(argv).(type) {
 	case Help:
 		fmt.Fprint(stdout, helpText)
 		return 0
 	case Version:
 		// Info-level per appspec/07: colored unconditionally, even piped.
-		fmt.Fprintln(stdout, info.paint("Mackup "+versionString()))
+		fmt.Fprintln(stdout, color.Info.Paint("Mackup "+versionString()))
 		return 0
 	case ShowUsage:
 		fmt.Fprint(stdout, usageText)
@@ -42,7 +45,7 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 		// it renders through fatalLine rather than fatal.
 		return fatalLine(stderr, forceConflictLine)
 	case Command:
-		return runCommand(inv, stdout, stderr)
+		return runCommand(inv, stdin, stdout, stderr)
 	}
 	// Parse returns a closed set; a new Invocation shape without a case here
 	// is a programming error, and it must not fail silently.
@@ -56,7 +59,7 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 // ambient state — environment variables and the effective UID — is read here at
 // the process boundary, so the steps below stay functions of values.
 // [LAW:effects-at-boundaries]
-func runCommand(cmd Command, stdout, stderr io.Writer) int {
+func runCommand(cmd Command, stdin io.Reader, stdout, stderr io.Writer) int {
 	env := config.Env{
 		Home:          os.Getenv("HOME"),
 		MackupConfig:  os.Getenv("MACKUP_CONFIG"),
@@ -78,17 +81,46 @@ func runCommand(cmd Command, stdout, stderr io.Writer) int {
 	if err := checkEnvironment(cfg, cmd.Root, os.Geteuid()); err != nil {
 		return fatal(stderr, err.Error())
 	}
-	// Step 5 has no list/show branch (appspec/01 §4); dispatch straight to them.
-	// The remaining verbs' per-command storage gates and operations land in
-	// later tickets.
+	// Step 5. list/show have no folder gate; backup/restore run the sync engine,
+	// whose Mackup-folder gate is inside syncops. A named application is
+	// validated here, before that gate (appspec/01 §3, appspec/06).
 	switch cmd.Verb {
 	case VerbList:
 		return runList(db, stdout)
 	case VerbShow:
 		return runShow(db, cmd.App, stdout, stderr)
+	case VerbBackup, VerbRestore:
+		scope, ok := resolveScope(cmd.App, cfg, db, stderr)
+		if !ok {
+			return 1 // an unknown named application (message already written)
+		}
+		conf := syncops.NewConfirmer(cmd.Confirm, stdin, stdout)
+		opts := syncops.Options{DryRun: cmd.DryRun, Verbose: cmd.Verbose}
+		home := filepath.Clean(env.Home)
+		if cmd.Verb == VerbBackup {
+			return syncops.Backup(home, cfg.MackupFolder(), db, scope, opts, conf, stdout, stderr)
+		}
+		return syncops.Restore(home, cfg.MackupFolder(), db, scope, opts, conf, stdout, stderr)
 	default:
 		return fatal(stderr, "the "+cmd.Verb.String()+" command is not implemented yet")
 	}
+}
+
+// resolveScope applies the appspec/01 §3 selector: a named application replaces
+// the configured scope with exactly that key, overriding both the allow and
+// ignore lists; otherwise the scope is the configured allow-minus-ignore set
+// over all keys. A named application is validated here — an unknown name writes
+// "Unsupported application" and returns ok=false before any folder gate or
+// prompt (appspec/06). The configured set is already sorted (db.Keys is sorted).
+func resolveScope(app string, cfg config.Config, db appdb.Database, stderr io.Writer) ([]string, bool) {
+	if app != "" {
+		if _, known := db.Lookup(app); !known {
+			unsupportedApp(stderr, app)
+			return nil, false
+		}
+		return []string{app}, true
+	}
+	return cfg.Scope(db.Keys()), true
 }
 
 // checkEnvironment is the universal environment gate of appspec/01 §4 level 1:
@@ -103,16 +135,10 @@ func checkEnvironment(cfg config.Config, allowRoot bool, euid int) error {
 		return errors.New("Running as superuser can be dangerous. " +
 			"Run 'mackup --help' for guidance, or pass --root to override.")
 	}
-	if !isDir(cfg.Root()) {
+	if !homepath.IsDir(cfg.Root()) {
 		return fmt.Errorf("Unable to find the storage folder: %s", cfg.Root())
 	}
 	return nil
-}
-
-// isDir reports whether p exists and is a directory.
-func isDir(p string) bool {
-	info, err := os.Stat(p)
-	return err == nil && info.IsDir()
 }
 
 // fatalLine renders one fatal diagnostic — bright red, on stderr, exit 1 — the
@@ -123,8 +149,16 @@ func isDir(p string) bool {
 // "Error:" prefix would corrupt. Color, stream, and exit code cannot drift
 // because they live only here. [LAW:single-enforcer]
 func fatalLine(stderr io.Writer, msg string) int {
-	fmt.Fprintln(stderr, fatalError.paint(msg))
+	fmt.Fprintln(stderr, color.FatalError.Paint(msg))
 	return 1
+}
+
+// unsupportedApp writes the bare "Unsupported application: <key>" contract line
+// (appspec/07 — no "Error:" prefix) and returns exit 1. It is the one renderer
+// for the unknown-application failure that show and the sync commands share.
+// [LAW:single-enforcer]
+func unsupportedApp(stderr io.Writer, key string) int {
+	return fatalLine(stderr, "Unsupported application: "+key)
 }
 
 // fatal writes one guarded fatal diagnostic — the `Error: …` line that

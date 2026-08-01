@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/brandon-fryslie/macklebox/internal/appdb"
+	"github.com/brandon-fryslie/macklebox/internal/color"
 )
 
 // runList prints the appspec/05 Enumeration format: the sorted application keys
@@ -19,7 +20,7 @@ func runList(db appdb.Database, stdout io.Writer) int {
 		b.WriteString(" - " + key + "\n")
 	}
 	fmt.Fprintf(&b, "\n%d applications supported in Mackup v%s\n", len(keys), versionString())
-	fmt.Fprint(stdout, info.paint(b.String()))
+	fmt.Fprint(stdout, color.Info.Paint(b.String()))
 	return 0
 }
 
@@ -31,9 +32,7 @@ func runList(db appdb.Database, stdout io.Writer) int {
 func runShow(db appdb.Database, key string, stdout, stderr io.Writer) int {
 	app, ok := db.Lookup(key)
 	if !ok {
-		// The bare "Unsupported application:" contract token (appspec/07) —
-		// through the shared fatal renderer, but without fatal's "Error:" prefix.
-		return fatalLine(stderr, "Unsupported application: "+key)
+		return unsupportedApp(stderr, key)
 	}
 	var b strings.Builder
 	b.WriteString("Name: " + app.Name() + "\n")
@@ -41,6 +40,6 @@ func runShow(db appdb.Database, key string, stdout, stderr io.Writer) int {
 	for _, path := range app.Files() {
 		b.WriteString(" - " + path + "\n")
 	}
-	fmt.Fprint(stdout, info.paint(b.String()))
+	fmt.Fprint(stdout, color.Info.Paint(b.String()))
 	return 0
 }

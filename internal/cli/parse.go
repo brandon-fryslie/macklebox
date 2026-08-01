@@ -6,6 +6,8 @@ package cli
 import (
 	"fmt"
 	"strings"
+
+	"github.com/brandon-fryslie/macklebox/internal/syncops"
 )
 
 // Invocation is the parser's entire output: every argv resolves to exactly one
@@ -44,7 +46,7 @@ type Command struct {
 	// configured set (appspec/02 "Selecting which applications"). Keys are
 	// never empty, and the parser guarantees App != "" for VerbShow.
 	App        string
-	Confirm    ConfirmPolicy
+	Confirm    syncops.Policy
 	Root       bool
 	DryRun     bool
 	Verbose    bool
@@ -90,17 +92,6 @@ func (v Verb) String() string {
 	}
 	return fmt.Sprintf("Verb(%d)", int(v))
 }
-
-// ConfirmPolicy is the resolved answer source for yes/no confirmation prompts
-// (appspec/07 confirmation policy): ask interactively, or pre-answer every
-// prompt one way.
-type ConfirmPolicy int
-
-const (
-	ConfirmAsk       ConfirmPolicy = iota
-	ConfirmAlwaysYes               // --force
-	ConfirmAlwaysNo                // --force-no
-)
 
 // Parse maps argv (without the program name) to an Invocation. It is a pure
 // function — no I/O, no environment — so the whole grammar is testable with
@@ -217,12 +208,12 @@ func Parse(argv []string) Invocation {
 	if forceYes && forceNo {
 		return ForceConflict{}
 	}
-	confirm := ConfirmAsk
+	confirm := syncops.Ask
 	switch {
 	case forceYes:
-		confirm = ConfirmAlwaysYes
+		confirm = syncops.AlwaysYes
 	case forceNo:
-		confirm = ConfirmAlwaysNo
+		confirm = syncops.AlwaysNo
 	}
 
 	return Command{

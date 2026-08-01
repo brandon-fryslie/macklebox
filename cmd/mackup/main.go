@@ -12,5 +12,5 @@ import (
 // stdout/stderr, exit code. Every decision lives in cli, where it is testable
 // without a subprocess. [LAW:effects-at-boundaries]
 func main() {
-	os.Exit(cli.Run(os.Args[1:], os.Stdout, os.Stderr))
+	os.Exit(cli.Run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
