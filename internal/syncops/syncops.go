@@ -262,6 +262,10 @@ func (e *engine) linkInstallTrace(home, mackup string) {
 		e.trace("Doing nothing, " + home + " is already linked to " + mackup)
 	case fileops.StateBrokenLink:
 		e.trace("Doing nothing, " + home + " is a broken link")
+	case fileops.StateMackupOnly:
+		// The crash-window residue: home is gone but the content survives in
+		// Mackup. Say so, so verbose output does not imply the data is lost.
+		e.trace("Doing nothing, " + home + " does not exist (its content is in the Mackup folder; run 'link' to recover)")
 	default:
 		e.trace("Doing nothing, " + home + " does not exist")
 	}

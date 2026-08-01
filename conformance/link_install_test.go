@@ -74,6 +74,26 @@ func TestLinkInstallDryRunMutatesNothing(t *testing.T) {
 	}
 }
 
+func TestLinkInstallReplacesExistingBackupCopyOnConfirm(t *testing.T) {
+	// A Mackup copy already exists (from a prior backup): link install prompts
+	// to replace it and, on a "yes" answer over stdin, replaces the backup and
+	// symlinks home back — exercising the PathExists(mackup) branch end to end.
+	home, mackup, homeFile := seedApp(t)
+	runEnv(t, home, nil, "--force", "backup", "myapp") // seed mackup/.myapprc
+
+	r := runStdin(t, home, "yes\n", nil, "link", "install", "myapp")
+	if r.Exit != 0 {
+		t.Fatalf("link install exit = %d, want 0; stderr=%q", r.Exit, r.Stderr)
+	}
+	if !strings.Contains(stripANSI(r.Stdout), "already exists in the backup") {
+		t.Errorf("stdout = %q, want the replace-in-backup prompt", stripANSI(r.Stdout))
+	}
+	target, err := os.Readlink(homeFile)
+	if err != nil || target != filepath.Join(mackup, ".myapprc") {
+		t.Errorf("home path = (%q, %v); want a symlink into the Mackup folder", target, err)
+	}
+}
+
 func TestLinkInstallUnknownApplicationFails(t *testing.T) {
 	home := workingHome(t)
 	r := runEnv(t, home, nil, "--force", "link", "install", "nope")

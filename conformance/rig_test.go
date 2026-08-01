@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -69,8 +70,16 @@ func run(t *testing.T, argv ...string) result {
 // place before the process starts.
 func runEnv(t *testing.T, home string, extraEnv []string, argv ...string) result {
 	t.Helper()
+	return runStdin(t, home, "", extraEnv, argv...)
+}
+
+// runStdin is runEnv with a prepared stdin, for commands that reach a
+// confirmation prompt without a force flag.
+func runStdin(t *testing.T, home, stdin string, extraEnv []string, argv ...string) result {
+	t.Helper()
 	cmd := exec.Command(binPath, argv...)
 	cmd.Env = append([]string{"HOME=" + home, "PATH=" + os.Getenv("PATH")}, extraEnv...)
+	cmd.Stdin = strings.NewReader(stdin)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
