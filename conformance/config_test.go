@@ -112,14 +112,14 @@ func TestUnknownEngineIsTheUnguardedRegime(t *testing.T) {
 	}
 }
 
-func TestFileSystemEngineResolvesWithoutExistenceCheck(t *testing.T) {
-	// appspec/04 clause 2: the file_system engine performs no existence
-	// check at resolution, so a config naming a nonexistent path clears the
-	// config gate exactly like one naming an existing path — today both land
-	// on the same not-yet-implemented fatal. When macklebox-resolvers-aol.3
-	// adds the environment gate, the missing-path run must instead fail
-	// there with "Unable to find the storage folder: <path>"; replace the
-	// identical-stderr assertion with that split when the gate exists.
+func TestFileSystemEngineDefersExistenceCheckToTheGate(t *testing.T) {
+	// appspec/04 clause 2 + appspec/01 §4 level 1: the file_system engine
+	// performs no existence check at resolution, so a config naming a
+	// nonexistent path resolves exactly like one naming an existing path. The
+	// check is deferred to the universal environment gate — the existing path
+	// clears every gate (exit 0), while the missing path fails there with
+	// "Unable to find the storage folder: <path>", not with a resolution-time
+	// provider error.
 	existing := t.TempDir()
 	if err := os.Mkdir(filepath.Join(existing, "store"), 0o755); err != nil {
 		t.Fatal(err)
@@ -128,14 +128,21 @@ func TestFileSystemEngineResolvesWithoutExistenceCheck(t *testing.T) {
 	missing := t.TempDir()
 	writeHome(t, missing, ".mackup.cfg", "[storage]\nengine = file_system\npath = does/not/exist\n")
 
-	got := runEnv(t, existing, nil, "list")
-	want := runEnv(t, missing, nil, "list")
-	if strings.Contains(stripANSI(want.Stderr), "Unable to find your") {
-		t.Errorf("missing-path run failed at storage resolution: %q", want.Stderr)
+	ok := runEnv(t, existing, nil, "list")
+	if ok.Exit != 0 {
+		t.Errorf("existing storage path: exit = %d, want 0 (all gates cleared); stderr=%q", ok.Exit, ok.Stderr)
 	}
-	if got.Stderr != want.Stderr || got.Exit != want.Exit {
-		t.Errorf("existing vs missing path diverged at resolution:\n got: exit %d, %q\nwant: exit %d, %q",
-			got.Exit, got.Stderr, want.Exit, want.Stderr)
+
+	bad := runEnv(t, missing, nil, "list")
+	if bad.Exit != 1 {
+		t.Errorf("missing storage path: exit = %d, want 1", bad.Exit)
+	}
+	stderr := stripANSI(bad.Stderr)
+	if strings.Contains(stderr, "Unable to find your") {
+		t.Errorf("missing path failed at resolution, not the gate: %q", stderr)
+	}
+	if !strings.Contains(stderr, "Unable to find the storage folder") {
+		t.Errorf("missing-path stderr = %q, want the storage-folder gate error", stderr)
 	}
 }
 
