@@ -61,10 +61,16 @@ type result struct {
 // observation. [LAW:no-ambient-temporal-coupling]
 func run(t *testing.T, argv ...string) result {
 	t.Helper()
-	home := t.TempDir()
+	return runEnv(t, t.TempDir(), nil, argv...)
+}
 
+// runEnv is run with a caller-prepared home and extra KEY=VALUE environment
+// entries, for observations that need config files or discovery variables in
+// place before the process starts.
+func runEnv(t *testing.T, home string, extraEnv []string, argv ...string) result {
+	t.Helper()
 	cmd := exec.Command(binPath, argv...)
-	cmd.Env = []string{"HOME=" + home, "PATH=" + os.Getenv("PATH")}
+	cmd.Env = append([]string{"HOME=" + home, "PATH=" + os.Getenv("PATH")}, extraEnv...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

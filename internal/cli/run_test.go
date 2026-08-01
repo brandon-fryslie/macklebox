@@ -90,10 +90,17 @@ func TestBareInvocationShowsUsageExitZero(t *testing.T) {
 	}
 }
 
-// Until the resolvers epic lands, every real command must hit the config-load
-// gate and fail loudly — never exit 0 pretending work happened.
+// Under a scratch HOME no storage engine can resolve (the default engine is
+// Dropbox and there is no host.db), so every real command must fail loudly at
+// the config gate — never exit 0 pretending work happened.
 // [LAW:no-silent-failure]
 func TestCommandsFailLoudlyAtConfigGate(t *testing.T) {
+	// runCommand reads the environment at the process boundary; scrub every
+	// variable config discovery consults so the developer's real config
+	// cannot leak into the observation. [LAW:no-ambient-temporal-coupling]
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MACKUP_CONFIG", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
 	for _, argv := range [][]string{{"list"}, {"show", "vim"}, {"backup"}, {"restore"}, {"link"}} {
 		stdout, stderr, code := runCLI(t, argv...)
 		if code == 0 {

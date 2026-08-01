@@ -1,9 +1,11 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"io"
+	"os"
+
+	"github.com/brandon-fryslie/macklebox/internal/config"
 )
 
 // forceConflictLine is the exact stderr line appspec/02 "Mutually exclusive
@@ -47,8 +49,18 @@ func Run(argv []string, stdout, stderr io.Writer) int {
 
 // runCommand is dispatch steps 2–3 of appspec/01 §4: every command except
 // --help/--version passes the config-load gate before its subcommand runs.
+// The environment is read here — the process boundary — so config.Load stays
+// a function of values. [LAW:effects-at-boundaries]
 func runCommand(cmd Command, stdout, stderr io.Writer) int {
-	if _, err := loadConfig(cmd.ConfigFile); err != nil {
+	env := config.Env{
+		Home:          os.Getenv("HOME"),
+		MackupConfig:  os.Getenv("MACKUP_CONFIG"),
+		XDGConfigHome: os.Getenv("XDG_CONFIG_HOME"),
+	}
+	// Guarded config failures arrive as errors and render through the single
+	// fatal enforcer; unguarded ones panic inside Load and stay uncaught — the
+	// appspec/01 §6 regime split, carried by mechanism.
+	if _, err := config.Load(env, cmd.ConfigFile); err != nil {
 		return fatal(stderr, err.Error())
 	}
 	return fatal(stderr, "the "+cmd.Verb.String()+" command is not implemented yet")
@@ -61,16 +73,4 @@ func runCommand(cmd Command, stdout, stderr io.Writer) int {
 func fatal(stderr io.Writer, msg string) int {
 	fmt.Fprintln(stderr, fatalError.paint("Error: "+msg))
 	return 1
-}
-
-// Config will carry the three facts the startup pipeline resolves
-// (appspec/01 §4: storage location, storage directory, application scope).
-type Config struct{}
-
-// loadConfig is the seam the resolvers epic (macklebox-resolvers-aol) fills.
-// Until then it fails loudly: pretending an empty config loaded would let
-// every subcommand run against a state the spec says cannot exist.
-// [LAW:no-silent-failure] [LAW:locality-or-seam]
-func loadConfig(path string) (Config, error) {
-	return Config{}, errors.New("config loading is not implemented yet (macklebox-resolvers-aol.1)")
 }
