@@ -89,7 +89,7 @@ func runCommand(cmd Command, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runList(db, stdout)
 	case VerbShow:
 		return runShow(db, cmd.App, stdout, stderr)
-	case VerbBackup, VerbRestore, VerbLinkInstall, VerbLink:
+	case VerbBackup, VerbRestore, VerbLinkInstall, VerbLink, VerbLinkUninstall:
 		scope, ok := resolveScope(cmd.App, cfg, db, stderr)
 		if !ok {
 			return 1 // an unknown named application (message already written)
@@ -107,6 +107,8 @@ func runCommand(cmd Command, stdin io.Reader, stdout, stderr io.Writer) int {
 			return syncops.LinkInstall(home, folder, db, scope, opts, conf, stdout, stderr)
 		case VerbLink:
 			return syncops.Link(home, folder, db, scope, opts, conf, stdout, stderr)
+		case VerbLinkUninstall:
+			return syncops.LinkUninstall(home, folder, db, scope, opts, conf, stdout, stderr)
 		default:
 			// The outer case admits exactly the four verbs above; a fifth added
 			// there without a dispatch here must fail loudly, not run the wrong

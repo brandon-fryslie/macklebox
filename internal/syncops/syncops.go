@@ -100,6 +100,15 @@ func Link(home, mackupFolder string, db appdb.Database, scope []string, opts Opt
 	return e.execute(requireFolder, e.linkFile)
 }
 
+// LinkUninstall reverts links back to real files (appspec/06 "link uninstall"):
+// each genuine symlink into Mackup is replaced by a real copy of the Mackup
+// content, while a foreign/user-substituted file at the home path is left
+// untouched with a warning. It requires the Mackup folder to already exist.
+func LinkUninstall(home, mackupFolder string, db appdb.Database, scope []string, opts Options, conf *Confirmer, stdout, stderr io.Writer) int {
+	e := newEngine("Link uninstall", direction{}, home, mackupFolder, db, scope, opts, conf, stdout, stderr)
+	return e.execute(requireFolder, e.linkUninstallFile)
+}
+
 func newEngine(opName string, dir direction, home, mackupFolder string, db appdb.Database, scope []string, opts Options, conf *Confirmer, stdout, stderr io.Writer) *engine {
 	return &engine{
 		opName: opName, dir: dir, home: home, mackup: mackupFolder, db: db,
@@ -323,6 +332,52 @@ func (e *engine) linkFile(rel string) {
 	// 3/4. Create the symlink into the (unmodified) Mackup copy.
 	if err := fileops.Link(mackup, home); err != nil {
 		panic("link: cannot create the symlink " + home + ": " + err.Error())
+	}
+}
+
+// linkUninstallFile is the per-file procedure of appspec/06 "link uninstall",
+// the inverse of link install: revert a genuine symlink into Mackup back to a
+// real home file, while protecting a foreign file the user substituted at the
+// home path. A home path that only Mackup holds (no home entry) is left
+// storage-only — this pass reverts existing links, it does not create new home
+// copies. Like all link operations, a failure is uncaught and stops the run.
+func (e *engine) linkUninstallFile(rel string) {
+	home := filepath.Join(e.home, rel)
+	mackup := filepath.Join(e.mackup, rel)
+
+	// 1. Act only if the Mackup copy exists.
+	if !existsFileOrDir(mackup) {
+		e.trace("Doing nothing, " + mackup + " does not exist")
+		return
+	}
+	// 3. Nothing at the home path → leave the file storage-only.
+	if !fileops.PathExists(home) {
+		return
+	}
+	// 2. A home entry that is not our live link is a foreign/user-substituted
+	//    file: warn (to STDOUT — appspec/06 stream note) and skip, so the user's
+	//    own file is never clobbered (appspec/00 promise 10, reversibility).
+	if !fileops.AlreadyLinked(home, mackup) {
+		fmt.Fprintln(e.stdout, color.Anomaly.Paint(fmt.Sprintf(
+			"Warning: the file in your home %q does not point to the original file in Mackup %s, skipping...",
+			home, mackup)))
+		return
+	}
+	// A genuine link → revert it.
+	if e.opts.Verbose {
+		fmt.Fprintln(e.stdout, color.Info.Paint("Reverting "+mackup+"\n at "+home+" ..."))
+	} else {
+		fmt.Fprintln(e.stdout, color.Info.Paint("Reverting "+rel+" ..."))
+	}
+	if e.opts.DryRun {
+		return
+	}
+	// Delete the home symlink, then copy the Mackup content back as a real file.
+	if err := fileops.Delete(home); err != nil {
+		panic("link uninstall: cannot remove the home symlink " + home + ": " + err.Error())
+	}
+	if err := fileops.Copy(mackup, home); err != nil {
+		panic("link uninstall: cannot copy " + mackup + " back to " + home + ": " + err.Error())
 	}
 }
 
