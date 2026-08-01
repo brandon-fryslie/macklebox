@@ -52,19 +52,25 @@ func attributeInvocations(goos, path string) [][]string {
 // removeAttributes strips filesystem attributes that would block a chmod or a
 // delete, by running the platform's cleanup commands recursively on path. It is
 // the precondition shared by Clamp and Delete (appspec/06), so it lives in one
-// place. Each step is best-effort: an absent binary is skipped (by
-// attributeInvocations), and a command that runs but fails (e.g. no ACL to
-// remove) is ignored — the real failure, if any, surfaces at the subsequent
-// chmod or remove. [LAW:no-silent-failure] exception: best-effort per appspec/06.
+// place. path is expected to be absolute — the primitives operate on the
+// resolved home ($HOME/f) and mackup (<folder>/f) paths — so it always begins
+// with a separator and can never be misparsed by a command as an option. Each
+// step is best-effort: an absent binary is skipped (by attributeInvocations),
+// and a command that runs but fails (e.g. no ACL to remove) is ignored — the
+// real failure, if any, surfaces at the subsequent chmod or remove.
+// [LAW:no-silent-failure] exception: best-effort per appspec/06.
 func removeAttributes(path string) {
 	for _, argv := range attributeInvocations(runtime.GOOS, path) {
 		_ = exec.Command(argv[0], argv[1:]...).Run()
 	}
 }
 
-// binaryExists reports whether an executable is present at the absolute path bin.
-// os.Stat follows symlinks, so a symlinked system binary counts as present.
+// binaryExists reports whether an executable file is present at the absolute
+// path bin: it must exist, not be a directory, and carry an execute bit — a
+// non-executable stub left at a binary path (e.g. a half-installed 0644 file)
+// would fail exec, so it is gated out here rather than attempted. os.Stat
+// follows symlinks, so a symlinked system binary counts.
 func binaryExists(bin string) bool {
 	info, err := os.Stat(bin)
-	return err == nil && !info.IsDir()
+	return err == nil && !info.IsDir() && info.Mode()&0o111 != 0
 }

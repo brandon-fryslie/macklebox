@@ -85,6 +85,68 @@ func TestCopyLeavesDestinationUntouchedOnFailure(t *testing.T) {
 	}
 }
 
+func TestCopySymlinkToFileCopiesTargetContent(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real")
+	writeFile(t, real, "content")
+	src := filepath.Join(dir, "srclink")
+	symlink(t, real, src)
+	dst := filepath.Join(dir, "dst")
+
+	if err := Copy(src, dst); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(dst); err != nil || string(got) != "content" {
+		t.Errorf("dst = %q, %v; want the symlink target's content", got, err)
+	}
+	if m := mode(t, dst); m != fileMode {
+		t.Errorf("dst mode = %o, want %o", m, fileMode)
+	}
+}
+
+func TestCopySymlinkToDirectoryMergesTree(t *testing.T) {
+	// The regression guard for the WalkDir bug: a symlink-to-directory src must
+	// copy the target's contents, not silently succeed with nothing.
+	dir := t.TempDir()
+	realDir := filepath.Join(dir, "realdir")
+	writeFile(t, filepath.Join(realDir, "a.txt"), "a")
+	writeFile(t, filepath.Join(realDir, "sub", "b.txt"), "b")
+	src := filepath.Join(dir, "dirlink")
+	symlink(t, realDir, src)
+	dst := filepath.Join(dir, "dst")
+
+	if err := Copy(src, dst); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"a.txt", "sub/b.txt"} {
+		if _, err := os.Stat(filepath.Join(dst, filepath.FromSlash(rel))); err != nil {
+			t.Errorf("missing %s: symlink-to-dir src copied nothing", rel)
+		}
+	}
+	if m := mode(t, filepath.Join(dst, "a.txt")); m != fileMode {
+		t.Errorf("copied file mode = %o, want %o", m, fileMode)
+	}
+}
+
+func TestCopyDirTreeWithInnerSymlinkCopiesItsContent(t *testing.T) {
+	// A symlink to a regular file inside the tree is dereferenced: its content
+	// lands as a real file in dst, rather than being silently dropped.
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	writeFile(t, filepath.Join(src, "plain.txt"), "plain")
+	target := filepath.Join(dir, "outside")
+	writeFile(t, target, "linked")
+	symlink(t, target, filepath.Join(src, "inner")) // inner symlink to a file
+	dst := filepath.Join(dir, "dst")
+
+	if err := Copy(src, dst); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dst, "inner")); err != nil || string(got) != "linked" {
+		t.Errorf("dst/inner = %q, %v; want the symlink target content copied", got, err)
+	}
+}
+
 func TestCopyNonFileNonDirIsError(t *testing.T) {
 	dir := t.TempDir()
 	fifo := filepath.Join(dir, "pipe")

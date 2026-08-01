@@ -1,6 +1,7 @@
 package fileops
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -57,8 +58,6 @@ func TestAttributeInvocationsGateOnPresenceAndAppendPath(t *testing.T) {
 }
 
 func TestBinaryExists(t *testing.T) {
-	// A directory is not an executable binary, and a nonexistent path does not
-	// exist; a real dir stands in for "present but not a file".
 	dir := t.TempDir()
 	if binaryExists(dir) {
 		t.Error("binaryExists(directory) = true, want false")
@@ -66,9 +65,20 @@ func TestBinaryExists(t *testing.T) {
 	if binaryExists(filepath.Join(dir, "nope")) {
 		t.Error("binaryExists(nonexistent) = true, want false")
 	}
-	present := filepath.Join(dir, "bin")
-	writeFile(t, present, "#!/bin/sh\n")
-	if !binaryExists(present) {
-		t.Error("binaryExists(existing file) = false, want true")
+	// A non-executable file at a binary path would fail exec, so it is not a
+	// usable binary.
+	nonExec := filepath.Join(dir, "stub")
+	if err := os.WriteFile(nonExec, []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if binaryExists(nonExec) {
+		t.Error("binaryExists(non-executable file) = true, want false")
+	}
+	exe := filepath.Join(dir, "bin")
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !binaryExists(exe) {
+		t.Error("binaryExists(executable file) = false, want true")
 	}
 }

@@ -51,28 +51,42 @@ func Copy(src, dst string) error {
 	return Clamp(dst)
 }
 
-// copyTree walks src and merges it into dst: directories are created, regular
-// files are copied, and anything else (symlinks, devices) inside the tree is
-// skipped rather than failing the whole copy.
+// copyTree recursively merges the directory src into dst. It classifies each
+// entry by os.Stat, which follows symlinks, so a symlinked file has its target
+// content copied and a symlinked subdirectory is descended into — the reference's
+// dereferencing behavior — rather than dropped. os.ReadDir likewise follows src
+// itself when src is a symlink to a directory. Entries with no file content — a
+// dangling symlink (Stat fails) or a special file such as a device or socket —
+// are skipped, the only sensible action and consistent with the clamp's
+// broken-symlink skip; existing dst-only files are left in place (merge).
 func copyTree(src, dst string) error {
-	return filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
+	if err := os.MkdirAll(dst, dirMode); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		s := filepath.Join(src, entry.Name())
+		d := filepath.Join(dst, entry.Name())
+		info, err := os.Stat(s) // follow symlinks; classify by the target
 		if err != nil {
-			return err
+			continue // dangling symlink or vanished entry: nothing to copy
 		}
-		rel, err := filepath.Rel(src, p)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dst, rel)
 		switch {
-		case d.IsDir():
-			return os.MkdirAll(target, dirMode)
-		case d.Type().IsRegular():
-			return copyFile(p, target)
-		default:
-			return nil // skip symlinks and special files within the tree
+		case info.IsDir():
+			if err := copyTree(s, d); err != nil {
+				return err
+			}
+		case info.Mode().IsRegular():
+			if err := copyFile(s, d); err != nil {
+				return err
+			}
 		}
-	})
+		// A device/socket/etc. has no file content to copy; skipped.
+	}
+	return nil
 }
 
 // copyFile copies one regular file's contents, overwriting dst if present. The
