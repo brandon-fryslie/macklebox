@@ -214,7 +214,10 @@ func (e *engine) linkInstallFile(rel string) {
 	}
 
 	// 3. If a backup copy already exists, confirm replacing it with the home
-	//    content; otherwise copy the home content in fresh.
+	//    content; otherwise copy the home content in fresh. Unlike backup and
+	//    restore, the link family does not aggregate failures — a failure inside
+	//    a link operation is an uncaught error that stops the run (appspec/06
+	//    partial-failure contract, the deliberate honesty-of-failure asymmetry).
 	if fileops.PathExists(mackup) {
 		yes, err := e.conf.ask(fmt.Sprintf(
 			"A %s named %s already exists in the backup. Are you sure that you want to replace it?",
@@ -226,24 +229,25 @@ func (e *engine) linkInstallFile(rel string) {
 			return
 		}
 		if err := e.replace(home, mackup); err != nil {
-			e.recordFailure(home, mackup, err)
-			return
+			panic("link install: cannot replace the backup copy " + mackup + ": " + err.Error())
 		}
 	} else if err := fileops.Copy(home, mackup); err != nil {
-		e.recordFailure(home, mackup, err)
-		return
+		panic("link install: cannot copy " + home + " into the Mackup folder: " + err.Error())
 	}
 
 	// The content now lives in Mackup. Turn the home path into a symlink to it:
-	// delete the home file, then link. This copy → delete-home → symlink order
-	// is appspec/06's one documented non-atomic window (appspec/01 §2, appspec/07
-	// crash residue); re-running recovers.
+	// delete the home file, then link. This copy → delete-home → symlink order is
+	// appspec/06's one documented non-atomic window (appspec/01 §2, appspec/07
+	// crash residue): an interruption between the delete and the link leaves the
+	// home path missing while the content survives in Mackup (StateMackupOnly).
+	// Re-running `link` recovers it (re-links from the surviving Mackup copy);
+	// link install itself acts only on real home content (step 1 above), so it
+	// does not re-link a mackup-only file.
 	if err := fileops.Delete(home); err != nil {
-		e.recordFailure(home, mackup, err)
-		return
+		panic("link install: cannot remove the home file " + home + ": " + err.Error())
 	}
 	if err := fileops.Link(mackup, home); err != nil {
-		e.recordFailure(home, mackup, err)
+		panic("link install: cannot create the symlink " + home + ": " + err.Error())
 	}
 }
 
