@@ -11,6 +11,7 @@ import (
 	"github.com/brandon-fryslie/macklebox/internal/catalog"
 	"github.com/brandon-fryslie/macklebox/internal/color"
 	"github.com/brandon-fryslie/macklebox/internal/config"
+	"github.com/brandon-fryslie/macklebox/internal/homepath"
 	"github.com/brandon-fryslie/macklebox/internal/syncops"
 )
 
@@ -93,7 +94,7 @@ func runCommand(cmd Command, stdin io.Reader, stdout, stderr io.Writer) int {
 		if !ok {
 			return 1 // an unknown named application (message already written)
 		}
-		conf := syncops.NewConfirmer(confirmPolicy(cmd.Confirm), stdin, stdout)
+		conf := syncops.NewConfirmer(cmd.Confirm, stdin, stdout)
 		opts := syncops.Options{DryRun: cmd.DryRun, Verbose: cmd.Verbose}
 		home := filepath.Clean(env.Home)
 		if cmd.Verb == VerbBackup {
@@ -122,20 +123,6 @@ func resolveScope(app string, cfg config.Config, db appdb.Database, stderr io.Wr
 	return cfg.Scope(db.Keys()), true
 }
 
-// confirmPolicy maps the parsed confirmation policy onto the sync engine's,
-// keeping the three-valued force/force-no/interactive decision one concept
-// across the boundary. [LAW:one-source-of-truth]
-func confirmPolicy(p ConfirmPolicy) syncops.Policy {
-	switch p {
-	case ConfirmAlwaysYes:
-		return syncops.AlwaysYes
-	case ConfirmAlwaysNo:
-		return syncops.AlwaysNo
-	default:
-		return syncops.Ask
-	}
-}
-
 // checkEnvironment is the universal environment gate of appspec/01 §4 level 1:
 // the root guard, then storage-root-directory existence — the point where the
 // file_system engine's deferred existence check finally fires (appspec/04).
@@ -148,16 +135,10 @@ func checkEnvironment(cfg config.Config, allowRoot bool, euid int) error {
 		return errors.New("Running as superuser can be dangerous. " +
 			"Run 'mackup --help' for guidance, or pass --root to override.")
 	}
-	if !isDir(cfg.Root()) {
+	if !homepath.IsDir(cfg.Root()) {
 		return fmt.Errorf("Unable to find the storage folder: %s", cfg.Root())
 	}
 	return nil
-}
-
-// isDir reports whether p exists and is a directory.
-func isDir(p string) bool {
-	info, err := os.Stat(p)
-	return err == nil && info.IsDir()
 }
 
 // fatalLine renders one fatal diagnostic — bright red, on stderr, exit 1 — the

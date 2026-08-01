@@ -102,7 +102,11 @@ func TestBackupPartialFailureReportsAndExitsOne(t *testing.T) {
 	if err := os.MkdirAll(mackup, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chmod(mackup, 0o700)
+	defer func() {
+		if err := os.Chmod(mackup, 0o700); err != nil {
+			t.Logf("cleanup chmod failed: %v", err)
+		}
+	}()
 
 	r := runEnv(t, home, nil, "--force", "backup", "myapp")
 	if r.Exit != 1 {
@@ -114,6 +118,35 @@ func TestBackupPartialFailureReportsAndExitsOne(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "Backup incomplete: 1 file(s) could not be copied:") {
 		t.Errorf("stderr = %q, want the incomplete summary", stderr)
+	}
+}
+
+func TestFailedReplaceLeavesTheOldCopyIntact(t *testing.T) {
+	// A replace whose copy fails must not leave the destination missing
+	// (appspec/07: a failing operation makes no filesystem change). Seed a
+	// backup, diverge the source, then make the Mackup folder read-only so the
+	// staged copy cannot be written — the old copy must survive.
+	home, mackup, homeFile := seedApp(t)
+	runEnv(t, home, nil, "--force", "backup", "myapp") // seed mackup/.myapprc = v1
+	if err := os.WriteFile(homeFile, []byte("config v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(mackup, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chmod(mackup, 0o700); err != nil {
+			t.Logf("cleanup chmod failed: %v", err)
+		}
+	}()
+
+	r := runEnv(t, home, nil, "--force", "backup", "myapp")
+	if r.Exit != 1 {
+		t.Errorf("exit = %d, want 1 (replace failed)", r.Exit)
+	}
+	got, err := os.ReadFile(filepath.Join(mackup, ".myapprc"))
+	if err != nil || string(got) != "config v1\n" {
+		t.Errorf("old copy = %q, %v; want the original preserved after a failed replace", got, err)
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 	"github.com/brandon-fryslie/macklebox/internal/color"
 	"github.com/brandon-fryslie/macklebox/internal/drift"
 	"github.com/brandon-fryslie/macklebox/internal/fileops"
+	"github.com/brandon-fryslie/macklebox/internal/homepath"
 )
 
 // Options carries the two run-mode booleans (appspec/01 §3).
@@ -98,7 +99,10 @@ func run(dir direction, home, mackupFolder string, db appdb.Database, scope []st
 	for _, key := range e.scope {
 		app, ok := e.db.Lookup(key)
 		if !ok {
-			continue // scope keys come from the database; a miss is not possible
+			// Scope keys are drawn from the database, so a miss is a broken
+			// invariant, not a routine case — fail loudly rather than silently
+			// dropping the application's files. [LAW:no-silent-failure]
+			panic("syncops: scope key not in the application database: " + key)
 		}
 		for _, rel := range app.Files() {
 			e.perFile(rel)
@@ -123,7 +127,7 @@ func (e *engine) perFile(rel string) {
 		return
 	}
 	// 3. A copy exists at the destination → drift-compare.
-	if pathExists(dst) {
+	if fileops.PathExists(dst) {
 		cmp := drift.Compare(src, dst)
 		if cmp.Identical {
 			e.trace(rel + " already in sync, skipping")
@@ -149,11 +153,7 @@ func (e *engine) perFile(rel string) {
 		if !yes {
 			return
 		}
-		if err := fileops.Delete(dst); err != nil {
-			e.recordFailure(src, dst, err)
-			return
-		}
-		if err := fileops.Copy(src, dst); err != nil {
+		if err := replace(src, dst); err != nil {
 			e.recordFailure(src, dst, err)
 		}
 		return
@@ -166,6 +166,31 @@ func (e *engine) perFile(rel string) {
 	if err := fileops.Copy(src, dst); err != nil {
 		e.recordFailure(src, dst, err)
 	}
+}
+
+// replace overwrites dst with a copy of src using replace (not merge) semantics,
+// safely. The copy — the failure-prone step — is staged in a unique temp
+// directory beside dst (same filesystem, so the final rename is atomic) while
+// dst stays intact; only once the copy fully succeeds is dst removed and the
+// staged copy moved into place. A copy failure therefore leaves dst untouched,
+// satisfying appspec/07's "no filesystem change for the failing operation" —
+// the same atomic discipline fileops.Copy applies to a single file, lifted to
+// the whole replace.
+func replace(src, dst string) error {
+	staging, err := os.MkdirTemp(filepath.Dir(dst), ".mackup-staging-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(staging)
+
+	staged := filepath.Join(staging, filepath.Base(dst))
+	if err := fileops.Copy(src, staged); err != nil {
+		return err // dst untouched
+	}
+	if err := fileops.Delete(dst); err != nil {
+		return err
+	}
+	return os.Rename(staged, dst)
 }
 
 func (e *engine) sourcePath(rel string) string {
@@ -228,7 +253,7 @@ func (e *engine) finish() int {
 // is absent. The folder-creation decision is NOT suppressed by dry-run — it is
 // an environment gate, not a per-file mutation (appspec/01 §3).
 func ensureFolder(e *engine) (bool, int) {
-	if isDir(e.mackup) {
+	if homepath.IsDir(e.mackup) {
 		return true, 0
 	}
 	yes, err := e.conf.ask("Mackup needs a directory to store your configuration files / Do you want to create it now? " + e.mackup)
@@ -239,14 +264,16 @@ func ensureFolder(e *engine) (bool, int) {
 		return false, e.fatal("Mackup can't do anything without a home =(")
 	}
 	if err := os.MkdirAll(e.mackup, 0o700); err != nil {
-		panic("cannot create the Mackup folder '" + e.mackup + "': " + err.Error())
+		// A permission or disk error creating the folder is a comprehensible
+		// failure, not a programming error — render it as a clean diagnostic.
+		return false, e.fatal("cannot create the Mackup folder '" + e.mackup + "': " + err.Error())
 	}
 	return true, 0
 }
 
 // requireFolder is restore's gate: the Mackup folder must already exist.
 func requireFolder(e *engine) (bool, int) {
-	if isDir(e.mackup) {
+	if homepath.IsDir(e.mackup) {
 		return true, 0
 	}
 	return false, e.fatal("Unable to find the Mackup folder: " + e.mackup +
@@ -267,18 +294,6 @@ func (e *engine) fatal(msg string) int {
 func existsFileOrDir(p string) bool {
 	info, err := os.Stat(p)
 	return err == nil && (info.Mode().IsRegular() || info.IsDir())
-}
-
-// pathExists reports whether anything is present at p (file, dir, or symlink).
-func pathExists(p string) bool {
-	_, err := os.Lstat(p)
-	return err == nil
-}
-
-// isDir reports whether p exists as a directory.
-func isDir(p string) bool {
-	info, err := os.Stat(p)
-	return err == nil && info.IsDir()
 }
 
 // pathKind is the noun appspec/07 uses for an existing destination: "link" for a

@@ -95,7 +95,7 @@ func State(homePath, mackupPath string) LinkState {
 	if err != nil {
 		// Nothing usable at home (absent, per the reference's error-as-false
 		// reading). The mackup copy's presence splits absent from mackup-only.
-		if pathExists(mackupPath) {
+		if PathExists(mackupPath) {
 			return StateMackupOnly
 		}
 		return StateAbsent
@@ -117,9 +117,9 @@ func State(homePath, mackupPath string) LinkState {
 	return StateRealFilePresent // a real file or directory
 }
 
-// pathExists reports whether anything (file, directory, or symlink) is present at
-// p. It uses Lstat so a symlink counts as present without being followed.
-func pathExists(p string) bool {
+// PathExists reports whether anything (file, directory, or symlink) is present
+// at p. It uses Lstat so a symlink counts as present without being followed.
+func PathExists(p string) bool {
 	_, err := os.Lstat(p)
 	return err == nil
 }

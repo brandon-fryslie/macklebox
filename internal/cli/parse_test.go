@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/brandon-fryslie/macklebox/internal/syncops"
 )
 
 // The grammar cases follow appspec/02 "Invocation forms": every listed form
@@ -36,9 +38,9 @@ func TestParseGrammar(t *testing.T) {
 		{"link uninstall all", []string{"link", "uninstall"}, Command{Verb: VerbLinkUninstall}},
 		{"link uninstall one", []string{"link", "uninstall", "vim"}, Command{Verb: VerbLinkUninstall, App: "vim"}},
 
-		{"force yes", []string{"-f", "backup"}, Command{Verb: VerbBackup, Confirm: ConfirmAlwaysYes}},
-		{"force yes long", []string{"--force", "backup"}, Command{Verb: VerbBackup, Confirm: ConfirmAlwaysYes}},
-		{"force no", []string{"--force-no", "restore"}, Command{Verb: VerbRestore, Confirm: ConfirmAlwaysNo}},
+		{"force yes", []string{"-f", "backup"}, Command{Verb: VerbBackup, Confirm: syncops.AlwaysYes}},
+		{"force yes long", []string{"--force", "backup"}, Command{Verb: VerbBackup, Confirm: syncops.AlwaysYes}},
+		{"force no", []string{"--force-no", "restore"}, Command{Verb: VerbRestore, Confirm: syncops.AlwaysNo}},
 		{"force conflict", []string{"-f", "--force-no", "backup"}, ForceConflict{}},
 		{"force conflict long", []string{"--force", "--force-no", "list"}, ForceConflict{}},
 
