@@ -84,8 +84,12 @@ Note what that is not: `config` and `appdb` reach `ini` and `homepath` directly,
 stack on.
 
 `cmd/mackup` is the only code that touches real argv, real streams, and the real exit code.
-Everything below takes streams and environment as values, which is why the entire boundary
-contract is testable in-process.
+Argv and the three streams are passed down as parameters from there, which is why the entire
+boundary contract is testable in-process. The environment is *not* passed in: `runCommand`
+reads `HOME`, `MACKUP_CONFIG`, `XDG_CONFIG_HOME` and the effective UID itself
+(`internal/cli/run.go:63-67,81`) and passes them down as values. So `cli.Run` is a function of
+its arguments *and* the ambient environment — in-process tests must scrub it with `t.Setenv`,
+as `internal/cli/run_test.go` does.
 
 **`internal/cli/run.go` is the spine.** It runs one fixed startup pipeline for every command
 — parse → config load → application-database assembly → universal environment gate → verb
@@ -107,13 +111,14 @@ and the first bullet is that failure mode already realized, not an invariant to 
   the `Error:` prefix, and the spec's bare contract lines (`Unsupported application: …`, the
   force-conflict line) bypass that prefix on purpose.
 - **backup and restore are one parameterized operation**, not two. A `direction` record
-  (`internal/syncops/syncops.go:36`) carries all seven differences: `name` (partial-failure
-  summary verb), `verb` (progress verb), `driftPhr` (drift header phrasing), `destNoun`
+  (`internal/syncops/syncops.go:36`) carries the differences, and its fields are exactly the
+  six `appspec/01 §1` enumerates: `sourceIsHome` (orientation — home path for backup, mackup
+  path for restore), `verb` (progress verb), `driftPhr` (drift header phrasing), `destNoun`
   (destination-location noun), `forceHint` (whether the replace prompt mentions `--force`),
-  `linkSkip` (whether backup skips a source already linked into Mackup), and `sourceIsHome`
-  (source/destination orientation — home path for backup, mackup path for restore). All
-  seven are spec-mandated parameterization per `appspec/01 §1`; any divergence *beyond* them
-  is a defect — do not fork the procedure.
+  and `linkSkip` (whether backup skips a source already linked into Mackup). Any divergence
+  *beyond* those six is a defect — do not fork the procedure. The partial-failure summary
+  verb is deliberately *not* here: it belongs to all seven operations, link included, so it
+  lives on `engine.opName`, which is passed to `newEngine` alongside the direction.
 - **One already-linked predicate, `fileops.AlreadyLinked`** (`internal/fileops/state.go:69`),
   shared by four callers: backup's link-skip step (`appspec/01 §2`) and the three link
   commands. Do not re-derive "is this already a symlink into the Mackup folder" locally.
@@ -163,7 +168,8 @@ leaves the mechanism to you:
   `backup --dry-run`.
 - **The version string is derived from build metadata**, never a hand-maintained constant.
 - **`link install` is intentionally non-atomic** — its copy → delete-home → symlink window is
-  documented in `appspec/07`, and the recovery path is re-running `link`.
+  documented in `appspec/01 §2` and `appspec/07`, which give the recovery path as re-running
+  "`link install` or `link`", either of which re-links from the surviving Mackup copy.
 
 ## Testing model
 
