@@ -13,13 +13,12 @@ without reference to any other implementation.
 
 ## Status
 
-Implementation in progress (Go). The command-line boundary — invocation
-grammar, global options, dispatch order, exit codes per
-[`appspec/02-invocation.md`](appspec/02-invocation.md) — is built; every
-subcommand currently stops at the config-load gate until the resolver layer
-lands. Start at [`appspec/00-overview.md`](appspec/00-overview.md) — the spec
-reads top-down through altitudes (product contract → architecture → boundary
-detail).
+Implementation in progress (Go). Built and working: the command-line boundary
+(invocation grammar, global options, dispatch order, exit codes per
+[`appspec/02-invocation.md`](appspec/02-invocation.md)), config resolution, all
+four storage engines, the application database, and all five sync operations.
+Start at [`appspec/00-overview.md`](appspec/00-overview.md) — the spec reads
+top-down through altitudes (product contract → architecture → boundary detail).
 
 ## Building
 

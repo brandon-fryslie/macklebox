@@ -32,9 +32,12 @@ type Options struct {
 
 // direction is the record that turns one algorithm into backup and restore
 // (appspec/06). Everything that differs between the two lives here — beyond
-// {direction, wording, the one link-skip}, any divergence is a defect.
+// {direction, wording, the one link-skip}, any divergence is a defect. The
+// fields are exactly the six differences appspec/01 §1 enumerates; the
+// partial-failure summary verb is not among them because it belongs to every
+// operation, link included, and so lives on engine.opName.
+// [LAW:one-source-of-truth]
 type direction struct {
-	name         string // "Backup" / "Restore" — the partial-failure summary verb
 	verb         string // progress verb: "Backing up" / "Recovering"
 	driftPhr     string // drift header phrasing: "home and Mackup" / "Mackup and home"
 	destNoun     string // destination-location noun: "the Mackup folder" / "your home folder"
@@ -44,12 +47,12 @@ type direction struct {
 }
 
 var backupDir = direction{
-	name: "Backup", verb: "Backing up", driftPhr: "home and Mackup",
+	verb: "Backing up", driftPhr: "home and Mackup",
 	destNoun: "the Mackup folder", forceHint: true, linkSkip: true, sourceIsHome: true,
 }
 
 var restoreDir = direction{
-	name: "Restore", verb: "Recovering", driftPhr: "Mackup and home",
+	verb: "Recovering", driftPhr: "Mackup and home",
 	destNoun: "your home folder", forceHint: false, linkSkip: false, sourceIsHome: false,
 }
 
